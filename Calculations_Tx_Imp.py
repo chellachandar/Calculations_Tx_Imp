@@ -1,17 +1,15 @@
 """
-calculations_tx.py
-==================
+calculations.py
+===============
 EHV Transformer Backup Impedance (Under-Impedance / Mho) Protection
 400/230 kV class — HV side relay
 IEC 60255-121:2014 & CEA Protection Guidelines 2010
 
-Structure mirrors calculations.py (distance line protection) exactly:
   - Section 1 : Base impedances & CT/VT conversion
   - Section 2 : Zone reaches  (Z1 / Z2 / Z3, forward; Z4 reverse optional)
-  - Section 3 : DEF — Restricted Earth Fault / Standby E/F
+  - Section 3 : Standby Earth Fault (SEF) / DEF-equivalent
   - Section 4 : Load encroachment / load blinder check
-  - Section 5 : Power swing block (PSB) — not typical for TX but
-                provided for completeness when relay supports it
+  - Section 5 : Power swing block (PSB)
 """
 
 import math
