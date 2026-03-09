@@ -503,8 +503,13 @@ with st.expander("📖 Theory & Interview Prep — Transformer Backup Impedance 
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown(sec("SECTION 2 — ZONE REACH CALCULATIONS (MHO CHARACTERISTIC)"), unsafe_allow_html=True)
 
-# Zone summary table
-z3_basis = f"Z_tx + 1.5 × Z_sys = {c['Ztx']:.4f} + {1.5*c['Zsys']:.4f}"
+# Zone summary table — Z3 governing label
+_z3_gov_short = {
+    'Option A (Z_tx + 1.5*Z_sys)': 'A: Z_tx+1.5Zsys',
+    'Option B (1.8*Z_tx = 1.5*Z2)': 'B: 1.8×Z_tx',
+    'IEC floor (1.2*Z2)':           'IEC floor: 1.2×Z2',
+}.get(c['Z3_governing'], c['Z3_governing'])
+
 st.markdown(f"""
 <table class="zone-table">
 <tr>
@@ -531,10 +536,11 @@ st.markdown(f"""
 <tr>
   <td><b>Z3</b></td>
   <td>{badge(f"{c['Z3_pct']*100:.1f}%","blue")}</td>
-  <td>Z_tx + 1.5×Z_sys (CEA §4.2.4)</td>
+  <td>MAX(A,B,Floor) — CEA §4.2.4 / IEC §6.3<br>
+      <small>A={c['Z3_optA']:.3f} · B={c['Z3_optB']:.3f} · Floor={c['Z3_floor']:.3f} Ω</small></td>
   <td>{c['Z3r_pri']:.4f}</td><td><b>{c['Z3r_sec']:.5f}</b></td>
   <td>{c['tZ3']:.2f}</td><td>Forward</td>
-  <td>{badge(f"tZ3 = {c['tZ3']}s","warn")}</td>
+  <td>{badge(f"▶ {_z3_gov_short}","warn")}</td>
 </tr>
 <tr>
   <td><b>Z4</b></td>
@@ -546,8 +552,8 @@ st.markdown(f"""
 </tr>
 </table>
 <div style="margin-top:6px;font-size:11px;font-family:IBM Plex Mono;color:#4a7fa0;">
-MTA (Maximum Torque Angle) = {c['Z1_ang']:.2f}° = arctan(X/R = {xr})  ·
-All secondary values via kk = CTR/PTR = {c['kk']:.5f}
+MTA = {c['Z1_ang']:.2f}° = arctan(X/R={xr})  ·  kk = CTR/PTR = {c['kk']:.5f}  ·
+Z3 always ≥ Z2 (IEC hard floor = 1.2 × Z2 = {c['Z3_floor']:.4f} Ω)  ·  SIR = {c['SIR']:.3f}
 </div>
 """, unsafe_allow_html=True)
 
@@ -663,15 +669,19 @@ with col_steps:
 
     with t_z3:
         st.markdown(fbox([
-            ("step", "Zone-3 — Remote Backup (CEA §4.2.4)"),
-            ("eq",   "Z3_reach = Z_tx + 1.5 × Z_sys"),
-            ("eq",   f"= {c['Ztx']:.4f} + 1.5 × {c['Zsys']:.4f}"),
-            ("eq",   f"= {c['Ztx']:.4f} + {1.5*c['Zsys']:.4f}"),
+            ("step", "Zone-3 — Remote Backup: MAX of 3 criteria (CEA §4.2.4 / IEC 60255-121 §6.3)"),
+            ("eq",   "Option A: Z3 = Z_tx + 1.5 × Z_sys  (source-impedance reach)"),
+            ("eq",   f"= {c['Ztx']:.4f} + 1.5 × {c['Zsys']:.4f} = {c['Z3_optA']:.4f} Ω"),
+            ("eq",   "Option B: Z3 = 1.8 × Z_tx  (= 1.5 × Z2; governs when source is strong)"),
+            ("eq",   f"= 1.8 × {c['Ztx']:.4f} = {c['Z3_optB']:.4f} Ω"),
+            ("eq",   "IEC Hard Floor: Z3 >= 1.2 × Z2  (minimum grading margin)"),
+            ("eq",   f"= 1.2 × {c['Z2r_pri']:.4f} = {c['Z3_floor']:.4f} Ω"),
+            ("res",  f"Z3 = MAX({c['Z3_optA']:.4f}, {c['Z3_optB']:.4f}, {c['Z3_floor']:.4f})  →  Governed by: {c['Z3_governing']}"),
             ("res",  f"Z3_primary = {c['Z3r_pri']:.6f} Ω"),
             ("eq",   f"Z3_secondary = {c['Z3r_pri']:.4f} × {c['kk']:.5f}"),
             ("res",  f"Z3_secondary = {c['Z3r_sec']:.6f} Ω"),
             ("eq",   f"tZ3 = {c['tZ3']} s  (400kV class — CEA §5.1)"),
-            ("note", "1.5× factor on Z_sys provides margin against fault level reduction over years."),
+            ("note", "Option B governs when fault level is high (strong source, low Z_sys). IEC floor ensures Z3 always exceeds Z2 by minimum 20%."),
         ]), unsafe_allow_html=True)
 
     with t_z4:
@@ -962,7 +972,7 @@ st.markdown(f"""
   <td><b>Zone 3</b></td>
   <td>{c['Z3r_pri']:.4f}</td><td><b>{c['Z3r_sec']:.5f}</b></td>
   <td>{c['tZ3']:.2f} s</td>
-  <td>CEA §4.2.4</td><td>Z_tx + 1.5×Z_sys — Remote backup, Forward</td>
+  <td>CEA §4.2.4 / IEC §6.3</td><td>MAX(A/B/floor) — Governing: " + c['Z3_governing'] + " — Forward</td>
 </tr>
 <tr>
   <td><b>Zone 4 (Reverse)</b></td>
