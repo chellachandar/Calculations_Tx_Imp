@@ -1,568 +1,1037 @@
-import streamlit as st
-import math, sys, os
-sys.path.insert(0, os.path.dirname(__file__))
-from calculations_hiref import calculate_hiref, interpolate_imag
+"""
+app_tx.py
+=========
+EHV Transformer Under-Impedance (Backup Impedance / Mho) Protection
+Setting Calculator — Streamlit App
 
+Structure mirrors app.py (line distance protection) exactly:
+  Sidebar inputs → Section 1 (Base Impedances & CT/VT)
+                 → Section 2 (Zone Reaches — Z1/Z2/Z3/Z4)
+                 → Section 3 (SEF — Standby Earth Fault / DEF-equivalent)
+                 → Section 4 (Load Encroachment / Blinder)
+                 → Section 5 (Power Swing Block)
+                 → Complete Settings Summary
+
+Theme: Light blue — background #e8f4fa, cards #ffffff, panel #f0f8fc,
+       borders #7ab8d4, text deep navy #03223a, dark blue #0a2a42
+       Active nav: solid dark blue #0a2a42 with white text
+
+Run:
+    pip install streamlit plotly
+    streamlit run app_tx.py
+"""
+
+import streamlit as st
+import math
+import sys, os
+import plotly.graph_objects as go
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(__file__))
+from calculations_tx import calculate_tx, TX_VECTOR_GROUPS
+
+# ── PAGE CONFIG ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="High Impedance REF Calculator",
-    page_icon="⚡", layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="EHV Transformer Backup Impedance Calculator",
+    page_icon="🔰",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# ── THEME CSS — LIGHT BLUE ─────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
-html,body,[class*="css"]{font-family:'IBM Plex Sans',sans-serif;}
-.stApp{background:#e8f4fa;color:#03223a;}
-section[data-testid="stSidebar"]{background:#daeef8!important;border-right:2px solid #7ab8d4;}
-section[data-testid="stSidebar"] *{color:#0a2a42!important;}
-section[data-testid="stSidebar"] input,section[data-testid="stSidebar"] select{
-  background:#ffffff!important;border:1px solid #7ab8d4!important;
-  color:#03223a!important;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:13px;}
-.main-title{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:700;color:#03223a;margin-bottom:2px;}
-.sub-title{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#1a5570;margin-bottom:20px;letter-spacing:1px;}
-.sec-hdr{background:#004d88;color:#ffffff;font-family:'IBM Plex Mono',monospace;
-  font-size:13px;font-weight:600;padding:10px 16px;border-radius:4px;margin:20px 0 12px 0;letter-spacing:.5px;}
-.sec-hdr.green{background:#005a2a;}.sec-hdr.orange{background:#7a3a00;}
-.sec-hdr.purple{background:#4a1f8a;}.sec-hdr.teal{background:#00555a;}
-.sec-hdr.red{background:#8b0000;}
-.rcard{background:#ffffff;border:1px solid #7ab8d4;border-radius:8px;padding:12px 14px;position:relative;overflow:hidden;}
-.rcard::before{content:'';position:absolute;top:0;left:0;width:3px;height:100%;background:#004d88;}
-.rcard.green::before{background:#005a2a;}.rcard.orange::before{background:#7a3a00;}
-.rcard.red::before{background:#8b0000;}.rcard.purple::before{background:#4a1f8a;}
-.rcard.teal::before{background:#00555a;}.rcard.warn::before{background:#b85000;}
-.rcard-label{font-family:'IBM Plex Mono',monospace;font-size:10px;color:#1a5570;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;}
-.rcard-value{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;color:#03223a;}
-.rcard-unit{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#4a7a9b;}
-.rcard-sub{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#004d88;margin-top:2px;}
-.rcgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:10px;margin:10px 0;}
-.fbox{background:#f0f8fc;border:1px solid #7ab8d4;border-radius:6px;padding:14px 18px;margin:8px 0;
-  font-family:'IBM Plex Mono',monospace;font-size:13px;}
-.fbox .step{color:#1a5570;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;margin-top:8px;}
-.fbox .step:first-child{margin-top:0;}
-.fbox .eq{color:#0a2a42;font-size:13px;margin:2px 0;}
-.fbox .res{color:#004d88;font-size:15px;font-weight:700;margin-top:6px;padding-top:6px;border-top:1px solid #7ab8d4;}
-.fbox .warn{color:#8b0000;font-size:12px;margin-top:4px;font-weight:600;}
-.fbox .note{color:#4a7a9b;font-size:11px;margin-top:4px;font-style:italic;}
-.settable{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:12px;margin:12px 0;}
-.settable th{background:#daeef8;color:#003366;padding:8px 12px;text-align:left;font-size:10px;
-  letter-spacing:1px;text-transform:uppercase;border:1px solid #7ab8d4;}
-.settable td{padding:8px 12px;border:1px solid #b8d8ea;color:#0a2a42;}
-.settable tr:nth-child(even) td{background:#f0f8fc;}
-.settable tr:hover td{background:#daeef8;}
-.tv{color:#005a2a!important;font-weight:700;}.tw{color:#7a3a00!important;font-weight:700;}
-.tr{color:#8b0000!important;font-weight:700;}
-.badge{display:inline-block;padding:3px 10px;border-radius:3px;font-family:'IBM Plex Mono',monospace;
-  font-size:10px;font-weight:700;text-transform:uppercase;}
-.b-green{background:#e8f5ee;color:#005a2a;border:1px solid #7ab8a4;}
-.b-red{background:#fde8e8;color:#8b0000;border:1px solid #e8a8a8;}
-.b-orange{background:#fef0e0;color:#7a3a00;border:1px solid #e8c080;}
-.b-blue{background:#daeef8;color:#003366;border:1px solid #7ab8d4;}
-.alert-ok{background:#e8f5ee;border:1px solid #7ab8a4;border-radius:6px;padding:10px 14px;
-  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#005a2a;margin:8px 0;}
-.alert-warn{background:#fff3e0;border:1px solid #e8c080;border-radius:6px;padding:10px 14px;
-  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7a3a00;margin:8px 0;}
-.alert-err{background:#fde8e8;border:1px solid #e8a8a8;border-radius:6px;padding:10px 14px;
-  font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8b0000;margin:8px 0;}
-.ct-panel{background:#ffffff;border:1px solid #7ab8d4;border-radius:8px;padding:16px;margin-bottom:12px;}
-.ct-panel h4{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#004d88;
-  text-transform:uppercase;letter-spacing:1px;margin:0 0 12px 0;padding-bottom:8px;border-bottom:1px solid #c8e4f2;}
+
+html, body, [class*="css"] {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: #e8f4fa !important;
+    color: #03223a !important;
+}
+
+.stApp { background: #e8f4fa !important; }
+
+/* ── SIDEBAR ── */
+section[data-testid="stSidebar"] {
+    background: #f0f8fc !important;
+    border-right: 2px solid #7ab8d4 !important;
+}
+section[data-testid="stSidebar"] * { color: #0a2a42 !important; }
+section[data-testid="stSidebar"] .stTextInput input,
+section[data-testid="stSidebar"] .stNumberInput input,
+section[data-testid="stSidebar"] .stSelectbox select {
+    background: #ffffff !important;
+    border: 1px solid #7ab8d4 !important;
+    color: #03223a !important;
+    border-radius: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+}
+
+/* ── TITLES ── */
+.main-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 26px; font-weight: 700;
+    color: #0a2a42;
+    letter-spacing: -0.5px; margin-bottom: 4px;
+}
+.sub-title {
+    font-size: 12px; color: #4a7fa0;
+    font-family: 'IBM Plex Mono', monospace;
+    margin-bottom: 24px; letter-spacing: 0.8px;
+}
+
+/* ── SECTION HEADERS ── */
+.sec-header {
+    background: linear-gradient(90deg, #d0e9f5 0%, #e8f4fa 100%);
+    border-left: 4px solid #0d7bbf;
+    padding: 10px 16px; margin: 24px 0 14px 0;
+    border-radius: 0 6px 6px 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px; font-weight: 700;
+    color: #0a2a42; letter-spacing: 0.5px;
+}
+.sec-header-sef  { border-left-color: #d97706; color: #7c3a00;
+    background: linear-gradient(90deg, #fef3e2 0%, #e8f4fa 100%); }
+.sec-header-load { border-left-color: #7c3aed; color: #3b1070;
+    background: linear-gradient(90deg, #ede9fe 0%, #e8f4fa 100%); }
+.sec-header-psb  { border-left-color: #059669; color: #064e3b;
+    background: linear-gradient(90deg, #d1fae5 0%, #e8f4fa 100%); }
+.sec-header-sum  { border-left-color: #03223a; color: #03223a;
+    background: linear-gradient(90deg, #cfe8f5 0%, #e8f4fa 100%); }
+
+/* ── RESULT CARDS ── */
+.result-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px; margin: 10px 0;
+}
+.rcard {
+    background: #ffffff;
+    border: 1px solid #7ab8d4;
+    border-radius: 8px; padding: 12px 14px;
+    position: relative; overflow: hidden;
+    box-shadow: 0 1px 4px rgba(10,42,66,0.07);
+}
+.rcard::before {
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 4px; height: 100%; background: #0d7bbf;
+}
+.rcard.sef::before   { background: #d97706; }
+.rcard.load::before  { background: #7c3aed; }
+.rcard.psb::before   { background: #059669; }
+.rcard.warn::before  { background: #dc2626; }
+.rcard.z1::before    { background: #0d7bbf; }
+.rcard.z2::before    { background: #d97706; }
+.rcard.z3::before    { background: #dc2626; }
+
+.rcard-label {
+    font-size: 10px; color: #4a7fa0;
+    font-family: 'IBM Plex Mono', monospace;
+    margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.8px;
+}
+.rcard-value {
+    font-size: 20px; font-weight: 700;
+    font-family: 'IBM Plex Mono', monospace; color: #03223a;
+}
+.rcard-unit  { font-size: 11px; color: #4a7fa0; font-family: 'IBM Plex Mono', monospace; }
+.rcard-sub   { font-size: 11px; color: #0d7bbf; margin-top: 2px; font-family: 'IBM Plex Mono', monospace; }
+
+/* ── FORMULA BOXES ── */
+.formula-box {
+    background: #f0f8fc; border: 1px solid #7ab8d4;
+    border-radius: 6px; padding: 14px 18px; margin: 8px 0;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    color: #0a2a42;
+}
+.formula-box .step {
+    color: #4a7fa0; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 1.2px; margin-bottom: 4px; margin-top: 8px;
+}
+.formula-box .step:first-child { margin-top: 0; }
+.formula-box .eq   { color: #1565a0; font-size: 13px; margin: 3px 0; }
+.formula-box .result {
+    color: #0a2a42; font-size: 15px; font-weight: 700;
+    margin-top: 6px; padding-top: 6px;
+    border-top: 1px solid #7ab8d4;
+}
+.formula-box .note { color: #4a7fa0; font-size: 11px; margin-top: 4px; font-style: italic; }
+
+/* ── THEORY BOXES ── */
+.theory-box {
+    background: #ffffff; border: 1px solid #7ab8d4;
+    border-radius: 6px; padding: 16px 18px; margin: 8px 0;
+    font-size: 13px; color: #0a2a42; line-height: 1.75;
+}
+.theory-box h4 {
+    color: #0a2a42; font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+    margin-bottom: 10px; margin-top: 0;
+    padding-bottom: 6px; border-bottom: 1px solid #b8d8ea;
+}
+.theory-box .q { color: #0d4f7a; font-weight: 700; margin-top: 10px; }
+.theory-box .a { color: #1e3a52; margin-left: 12px; margin-top: 3px; }
+
+/* ── ZONE SUMMARY TABLE ── */
+.zone-table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin: 10px 0;
+}
+.zone-table th {
+    background: #0a2a42; color: #ffffff;
+    padding: 9px 12px; text-align: center;
+    font-size: 11px; letter-spacing: 0.8px; text-transform: uppercase;
+    border: 1px solid #7ab8d4;
+}
+.zone-table td {
+    padding: 8px 12px; border: 1px solid #b8d8ea;
+    text-align: center; color: #03223a;
+    background: #ffffff;
+}
+.zone-table tr:nth-child(even) td { background: #f0f8fc; }
+.zone-table tr:hover td { background: #d0e9f5; }
+
+/* ── BADGES ── */
+.badge {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 4px; font-size: 11px; font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace;
+}
+.badge-blue   { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+.badge-green  { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge-orange { background: #ffedd5; color: #9a3412; border: 1px solid #fdba74; }
+.badge-red    { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.badge-warn   { background: #fef9c3; color: #713f12; border: 1px solid #fde047; }
+.badge-navy   { background: #0a2a42;   color: #ffffff; border: 1px solid #0a2a42; }
+
+/* ── HEADER INFO BAR ── */
+.info-bar {
+    background: #ffffff; border: 1px solid #7ab8d4;
+    border-radius: 8px; padding: 14px 20px;
+    display: flex; gap: 28px; flex-wrap: wrap;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 4px rgba(10,42,66,0.07);
+}
+.info-item .lbl { font-size: 10px; color: #4a7fa0; font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 1px; }
+.info-item .val { font-size: 15px; font-weight: 700; font-family: 'IBM Plex Mono', monospace; color: #0a2a42; }
+.info-item .val-blue { color: #0d7bbf; }
+
+/* ── DIVIDER ── */
+.hdivider { border: none; border-top: 1px solid #b8d8ea; margin: 14px 0; }
+
+/* ── STREAMLIT OVERRIDES ── */
+div[data-testid="metric-container"] {
+    background: #ffffff !important; border: 1px solid #7ab8d4 !important;
+    border-radius: 8px !important; padding: 10px !important;
+}
+div[data-testid="metric-container"] label { color: #4a7fa0 !important; }
+div[data-testid="metric-container"] div[data-testid="metric-value"] { color: #03223a !important; }
+
+.stExpander {
+    background: #f0f8fc !important;
+    border: 1px solid #7ab8d4 !important;
+    border-radius: 6px !important;
+}
+.stButton>button {
+    background: #0a2a42 !important; color: #ffffff !important;
+    border: none !important; border-radius: 6px !important;
+    font-family: 'IBM Plex Mono', monospace !important;
+    font-size: 12px !important; letter-spacing: 1.5px !important;
+}
+.stButton>button:hover { background: #0d4f7a !important; }
+
+/* ── TABS ── */
+div[data-baseweb="tab-list"] { background: #f0f8fc !important; border-bottom: 2px solid #7ab8d4; }
+div[data-baseweb="tab"] { color: #4a7fa0 !important; font-family: 'IBM Plex Mono', monospace !important; font-size: 12px !important; }
+div[data-baseweb="tab"][aria-selected="true"] {
+    background: #0a2a42 !important; color: #ffffff !important;
+    border-radius: 4px 4px 0 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
-CONFIG_NAMES = {
-    1: "3-Wire Balanced EF (3 Line CTs)",
-    2: "3-Wire + Earth REF (3 LCT + 1 ECT)",
-    3: "4-Wire REF (3 LCT + 1 Neutral CT)",
-    4: "4-Wire + Earth REF (3 LCT + 1 NCT + 1 ECT)"
-}
-
+# ── HELPERS (mirrors app.py) ───────────────────────────────────────────────────
 def rcard(label, value, unit="", sub="", kind=""):
-    return f"""<div class="rcard {kind}">
-<div class="rcard-label">{label}</div>
-<div class="rcard-value">{value}</div>
-<div class="rcard-unit">{unit}</div>
-{"<div class='rcard-sub'>"+sub+"</div>" if sub else ""}
+    cls = f"rcard {kind}".strip()
+    return f"""<div class="{cls}">
+    <div class="rcard-label">{label}</div>
+    <div class="rcard-value">{value}</div>
+    <div class="rcard-unit">{unit}</div>
+    {"<div class='rcard-sub'>" + sub + "</div>" if sub else ""}
 </div>"""
 
-def sec(title, kind=""):
-    return f'<div class="sec-hdr {kind}">⚡ {title}</div>'
-
 def fbox(steps):
-    h = ""
+    inner = ""
     for s in steps:
-        if s[0]=="step": h+=f'<div class="step">{s[1]}</div>'
-        elif s[0]=="eq":  h+=f'<div class="eq">{s[1]}</div>'
-        elif s[0]=="res": h+=f'<div class="res">▶ {s[1]}</div>'
-        elif s[0]=="warn":h+=f'<div class="warn">⚠ {s[1]}</div>'
-        elif s[0]=="note":h+=f'<div class="note">ℹ {s[1]}</div>'
-    return f'<div class="fbox">{h}</div>'
+        if   s[0] == "step": inner += f'<div class="step">{s[1]}</div>'
+        elif s[0] == "eq":   inner += f'<div class="eq">{s[1]}</div>'
+        elif s[0] == "res":  inner += f'<div class="result">▶ {s[1]}</div>'
+        elif s[0] == "note": inner += f'<div class="note">ℹ {s[1]}</div>'
+    return f'<div class="formula-box">{inner}</div>'
 
-def ct_inputs(label, key, defaults):
-    st.markdown(f'<div class="ct-panel"><h4>🔌 {label}</h4>', unsafe_allow_html=True)
-    c1,c2 = st.columns(2)
-    with c1:
-        T   = st.number_input(f"CT Ratio (1/T) [{key}]", 10, 5000, defaults["T"], 50,
-                              help="Enter secondary turns e.g. 600 for 1/600")
-        Vk  = st.number_input(f"Vk (V) [{key}]", 10.0, 2000.0, float(defaults["Vk"]), 10.0)
-        Imag= st.number_input(f"Imag @ Vk (mA) [{key}]", 1.0, 500.0, float(defaults["Imag"]), 1.0)
-    with c2:
-        RCT = st.number_input(f"RCT (Ω) [{key}]", 0.1, 50.0, float(defaults["RCT"]), 0.1, format="%.2f")
-        RL  = st.number_input(f"RL loop (Ω) [{key}]", 0.01, 10.0, float(defaults["RL"]), 0.01, format="%.3f")
-        method = st.selectbox(f"Imag method [{key}]", ["Interpolate from curve","Enter directly"],
-                              help="Interpolate: use calibrated CT magnetising curve | Enter: type Imag@Vs directly")
-    Imag_vs = None
-    if "Enter" in method:
-        Imag_vs = st.number_input(f"Imag @ Vs (mA) [{key}]", 0.1, 200.0, float(defaults["Imag"])*0.25, 0.1, format="%.2f")
-    st.markdown('</div>', unsafe_allow_html=True)
-    return dict(T=T, Vk=Vk, Imag=Imag, RCT=RCT, RL=RL,
-                method="interpolate" if "Interp" in method else "enter",
-                Imag_vs=Imag_vs)
+def tbox(title, content):
+    return f'<div class="theory-box"><h4>📖 {title}</h4>{content}</div>'
 
-# ── SIDEBAR ─────────────────────────────────────────────────────────
+def badge(text, color="blue"):
+    return f'<span class="badge badge-{color}">{text}</span>'
+
+def sec(title, kind=""):
+    cls = f"sec-header {('sec-header-' + kind) if kind else ''}".strip()
+    return f'<div class="{cls}">🔰 {title}</div>'
+
+def mho_points(z_reach, theta_deg, n=360):
+    """Return R, X arrays for a Mho circle."""
+    theta = math.radians(theta_deg)
+    Rc = (z_reach / 2) * math.cos(theta)
+    Xc = (z_reach / 2) * math.sin(theta)
+    r  = z_reach / 2
+    angles = [i * 2 * math.pi / n for i in range(n + 1)]
+    R = [Rc + r * math.cos(a) for a in angles]
+    X = [Xc + r * math.sin(a) for a in angles]
+    return R, X, Rc, Xc
+
+# ── SIDEBAR INPUTS ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div style="font-family:IBM Plex Mono;font-size:15px;color:#004d88;font-weight:700;margin-bottom:2px;">⚡ Hi-Z REF</div>', unsafe_allow_html=True)
-    st.markdown('<div style="font-family:IBM Plex Mono;font-size:10px;color:#1a5570;margin-bottom:16px;letter-spacing:1px;">HIGH IMPEDANCE REF CALCULATOR</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-family:IBM Plex Mono;font-size:15px;color:#0a2a42;font-weight:700;'
+        'margin-bottom:2px;">🔰 EHV TRANSFORMER</div>'
+        '<div style="font-family:IBM Plex Mono;font-size:10px;color:#4a7fa0;margin-bottom:16px;'
+        'letter-spacing:1.5px;">BACKUP IMPEDANCE PROTECTION</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown("**🏭 Identification**")
-    equip_name = st.text_input("Equipment Name", "TX1 — 33/11kV, 10MVA")
-    config_sel = st.selectbox("Scheme Configuration",
-        list(CONFIG_NAMES.values()), index=0)
-    config = [k for k,v in CONFIG_NAMES.items() if v == config_sel][0]
+    sub_name  = st.text_input("Substation Name",  "Biswanath Chairali")
+    tx_name   = st.text_input("Transformer Tag",  "400/230kV ICT-1")
+    voltage   = st.selectbox("HV Voltage (kV)", [220, 400, 765], index=1)
 
     st.markdown("---")
-    st.markdown("**⚡ System Parameters**")
-    mva     = st.number_input("Transformer MVA", 0.5, 1000.0, 10.0, 0.5)
-    vkv     = st.number_input("Protected Winding Voltage (kV)", 0.4, 765.0, 11.0, 0.5, format="%.1f")
-    if_mult = st.number_input("Through Fault Multiplier (×Irated)", 1, 25, 16,
-                              help="Typically 16 × Irated per IEC. Or use 1/Zpu × Irated.")
-    poc_pct = st.slider("POC — % of Irated", 10.0, 25.0, 10.0, 0.5,
-                        help="Primary Operate Current: typically 10–25% of protected winding rated current")
-
-    st.markdown("---")
-    st.markdown("**🔧 Relay Setting**")
-    relay_is = st.number_input("Relay Is (A)", 0.005, 2.0, 0.05, 0.005, format="%.4f",
-                               help="Relay pickup current. Set 0 to auto-calculate from POC.")
-
-    st.markdown("---")
-    st.markdown("**📐 Metrosil β**")
-    beta = st.number_input("β (Metrosil constant)", 0.20, 0.30, 0.25, 0.01, format="%.2f",
-                           help="IEC default: 0.22 to 0.25")
-
-    st.markdown("---")
-    calc_btn = st.button("⚡ CALCULATE REF SETTINGS", use_container_width=True, type="primary")
-
-# ── MAIN ────────────────────────────────────────────────────────────
-st.markdown('<div class="main-title">⚡ High Impedance REF Protection Calculator</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-title">Generic · IEC 60044 Class PX CT · Stability Voltage · Rstab · Metrosil · Primary Operate Current</div>', unsafe_allow_html=True)
-
-# CT INPUTS (shown always, adapt to config)
-st.markdown(sec("CT DETAILS — Input Parameters"), unsafe_allow_html=True)
-
-lct_d = dict(T=600, Vk=360, Imag=30, RCT=7.5, RL=0.15)
-nct_d = dict(T=600, Vk=450, Imag=20, RCT=4.5, RL=0.50)
-ect_d = dict(T=600, Vk=300, Imag=40, RCT=6.0, RL=0.20)
-
-if config == 1:
-    col1, col2 = st.columns([1,1])
-    with col1: lct = ct_inputs("Line CT (LCT) — 3 phases", "LCT", lct_d)
-    with col2:
-        st.markdown('<div style="background:#f0f8fc;border:1px solid #7ab8d4;border-radius:8px;padding:20px;margin-top:4px;">', unsafe_allow_html=True)
-        st.markdown('<div style="font-family:IBM Plex Mono;font-size:11px;color:#1a5570;text-transform:uppercase;letter-spacing:1px;">Scheme Diagram</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <svg viewBox="0 0 300 200" width="100%" xmlns="http://www.w3.org/2000/svg">
-          <text x="10" y="20" fill="#004d88" font-family="IBM Plex Mono" font-size="11" font-weight="bold">3-Wire Balanced EF</text>
-          <!-- Bus -->
-          <line x1="20" y1="40" x2="280" y2="40" stroke="#03223a" stroke-width="2"/>
-          <!-- 3 Line CTs -->
-          <rect x="50" y="50" width="20" height="30" rx="2" fill="none" stroke="#004d88" stroke-width="1.5"/>
-          <rect x="130" y="50" width="20" height="30" rx="2" fill="none" stroke="#004d88" stroke-width="1.5"/>
-          <rect x="210" y="50" width="20" height="30" rx="2" fill="none" stroke="#004d88" stroke-width="1.5"/>
-          <text x="50" y="47" fill="#004d88" font-family="IBM Plex Mono" font-size="9">A</text>
-          <text x="130" y="47" fill="#004d88" font-family="IBM Plex Mono" font-size="9">B</text>
-          <text x="210" y="47" fill="#004d88" font-family="IBM Plex Mono" font-size="9">C</text>
-          <!-- CT secondaries to relay -->
-          <line x1="60" y1="80" x2="60" y2="130" stroke="#7ab8d4" stroke-width="1"/>
-          <line x1="140" y1="80" x2="140" y2="130" stroke="#7ab8d4" stroke-width="1"/>
-          <line x1="220" y1="80" x2="220" y2="130" stroke="#7ab8d4" stroke-width="1"/>
-          <line x1="60" y1="130" x2="220" y2="130" stroke="#7ab8d4" stroke-width="1"/>
-          <line x1="140" y1="130" x2="140" y2="150" stroke="#7ab8d4" stroke-width="1.5"/>
-          <!-- Relay box -->
-          <rect x="100" y="150" width="90" height="35" rx="4" fill="#daeef8" stroke="#004d88" stroke-width="1.5"/>
-          <text x="107" y="163" fill="#004d88" font-family="IBM Plex Mono" font-size="9" font-weight="bold">Hi-Z REF</text>
-          <text x="108" y="177" fill="#1a5570" font-family="IBM Plex Mono" font-size="8">Relay + Rstab</text>
-          <!-- Transformer windings -->
-          <text x="75" y="110" fill="#4a7a9b" font-family="IBM Plex Mono" font-size="8">LCT</text>
-          <text x="155" y="110" fill="#4a7a9b" font-family="IBM Plex Mono" font-size="8">LCT</text>
-        </svg>
-        """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    nct, ect = None, None
-
-elif config == 2:
+    st.markdown("**🔌 Transformer Parameters**")
     c1, c2 = st.columns(2)
-    with c1: lct = ct_inputs("Line CT (LCT) — 3 phases", "LCT", lct_d)
-    with c2: ect = ct_inputs("Earth CT (ECT) — NER/Earth", "ECT", ect_d)
-    nct = None
+    with c1:
+        vhv = st.number_input("HV kV",  100.0, 800.0, 400.0, 1.0)
+        mva = st.number_input("MVA",    10.0,  1200.0, 315.0, 5.0)
+        xr  = st.number_input("X/R",    1.0,   60.0,   20.0, 1.0)
+    with c2:
+        vlv   = st.number_input("LV kV",    10.0,  400.0, 230.0, 1.0)
+        pct_z = st.number_input("%Z",        1.0,   50.0,  25.0, 0.1, format="%.1f")
+        vg    = st.selectbox("Vector Group", TX_VECTOR_GROUPS, index=1)
 
-elif config == 3:
+    st.markdown("---")
+    st.markdown("**🔗 CT & VT (HV Side)**")
     c1, c2 = st.columns(2)
-    with c1: lct = ct_inputs("Line CT (LCT) — 3 phases", "LCT", lct_d)
-    with c2: nct = ct_inputs("Neutral CT (NCT) — Transformer neutral", "NCT", nct_d)
-    ect = None
+    with c1:
+        ct_pri = st.number_input("CT Primary (A)",  100, 5000, 600, 100)
+        vt_pri = st.number_input("VT Primary (kV)", 1.0, 400.0, 230.0, 1.0,
+                                  help="VT is on LV (230 kV) side")
+    with c2:
+        ct_sec = st.number_input("CT Secondary (A)", 1, 5, 1, 1)
+        vt_sec = st.number_input("VT Secondary (V)", 100, 200, 110, 5)
 
-else:  # config 4
-    c1, c2 = st.columns(2)
-    with c1: lct = ct_inputs("Line CT (LCT) — 3 phases", "LCT", lct_d)
-    with c2: nct = ct_inputs("Neutral CT (NCT)", "NCT", nct_d)
-    c3, c4 = st.columns(2)
-    with c3: ect = ct_inputs("Earth CT (ECT) — NER/Earth", "ECT", ect_d)
-    with c4:
-        st.markdown(f"""<div style="background:#f0f8fc;border:1px solid #7ab8d4;border-radius:8px;
-        padding:16px;margin-top:4px;font-family:IBM Plex Mono;font-size:11px;color:#1a5570;">
-        <div style="font-weight:700;color:#004d88;margin-bottom:8px;">CONFIG 4 — 4 Wire 5CT</div>
-        3 × Line CT (LCT) in differential<br>
-        1 × Neutral CT (NCT) at transformer star point<br>
-        1 × Earth CT (ECT) at NER<br><br>
-        <div style="color:#0a2a42;">POC = (3×Imag_LCT + Imag_NCT + Imag_ECT + Is) / T</div>
-        </div>""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("**⚡ System / Fault Data**")
+    fault_mva  = st.number_input("3-ph Fault Level at HV Bus (MVA)", 100, 50000, 10000, 500)
+    if1_lv     = st.number_input("Min 1-ph Fault at LV Bus — HV referred (A)", 10, 50000, 800, 50,
+                                  help="Used for SEF TMS calculation")
+    i_nom      = st.number_input("Bay Nominal Current (A)", 100, 5000, 460, 10,
+                                  help="FLC at HV side = MVA / (√3 × HV kV)")
+
+    st.markdown("---")
+    st.markdown("**🌀 PSB**")
+    f_swing = st.number_input("Swing Frequency (Hz)", 0.1, 5.0, 1.5, 0.1)
+
+    st.markdown("---")
+    calc_btn = st.button("🔰 CALCULATE", use_container_width=True)
+
+# ── TITLE ──────────────────────────────────────────────────────────────────────
+st.markdown(
+    '<div class="main-title">🔰 EHV Transformer Backup Impedance Protection</div>'
+    '<div class="sub-title">UNDER-IMPEDANCE (MHO) · ZONE 1/2/3/4 · SEF · LOAD ENCROACHMENT · PSB '
+    '· IEC 60255-121 · CEA 2010</div>',
+    unsafe_allow_html=True,
+)
 
 if not calc_btn:
     st.markdown("""
     <div style="background:#ffffff;border:1px solid #7ab8d4;border-radius:8px;
-         padding:28px;margin-top:20px;text-align:center;">
-        <div style="font-family:IBM Plex Mono;font-size:14px;color:#1a5570;margin-bottom:10px;">
-            Fill CT parameters above and click CALCULATE REF SETTINGS
+         padding:28px;margin-top:20px;text-align:center;
+         box-shadow:0 1px 4px rgba(10,42,66,0.08);">
+        <div style="font-family:IBM Plex Mono;font-size:15px;color:#0a2a42;
+             font-weight:700;margin-bottom:8px;">
+            Fill in the parameters in the left panel and click CALCULATE
         </div>
-        <div style="font-family:IBM Plex Mono;font-size:11px;color:#4a7a9b;">
-            IEC 60044 Class PX · Stability Voltage · Rstab · Metrosil · POC
+        <div style="font-family:IBM Plex Mono;font-size:11px;color:#4a7fa0;line-height:2;">
+            Outputs include: Base Impedances &amp; CT/VT Conversion · Zone Reaches (Z1/Z2/Z3/Z4) ·
+            Mho R-X Diagram · Standby Earth Fault (SEF) TMS ·
+            Load Encroachment Blinder Check · Power Swing Block (PSB) ·
+            Step-by-step formulae with IEC/CEA references in every section ·
+            Interview preparation theory with Q&amp;A
         </div>
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
     st.stop()
 
-# ── BUILD INPUT DICT ─────────────────────────────────────────────────
+# ── RUN CALCULATIONS ───────────────────────────────────────────────────────────
 inp = dict(
-    config=config, mva=mva, voltage_kv=vkv, if_multiplier=if_mult,
-    poc_pct=poc_pct, relay_is=relay_is, beta=beta,
-    T_lct=lct["T"], Vk_lct=lct["Vk"], Imag_Vk_lct=lct["Imag"],
-    RCT_lct=lct["RCT"], RL_lct=lct["RL"],
-    imag_method_lct=lct["method"], Imag_Vs_lct=lct["Imag_vs"] or 0,
+    vhv_kv=vhv, vlv_kv=vlv, mva=mva, pct_z=pct_z, xr_ratio=xr,
+    ct_primary=ct_pri, ct_secondary=ct_sec,
+    pt_primary_kv=vt_pri, pt_secondary_v=vt_sec,
+    fault_mva=fault_mva, fault_1ph_lv=if1_lv,
+    nominal_current=i_nom, swing_freq=f_swing, vector_group=vg,
 )
-if nct:
-    inp.update(T_nct=nct["T"], Vk_nct=nct["Vk"], Imag_Vk_nct=nct["Imag"],
-               RCT_nct=nct["RCT"], RL_nct=nct["RL"],
-               imag_method_nct=nct["method"], Imag_Vs_nct=nct["Imag_vs"] or 0)
-if ect:
-    inp.update(T_ect=ect["T"], Vk_ect=ect["Vk"], Imag_Vk_ect=ect["Imag"],
-               RCT_ect=ect["RCT"], RL_ect=ect["RL"],
-               imag_method_ect=ect["method"], Imag_Vs_ect=ect["Imag_vs"] or 0)
+c = calculate_tx(inp)
 
-c = calculate_hiref(inp)
-
-# ── HEADER BAR ──────────────────────────────────────────────────────
+# ── HEADER INFO BAR ────────────────────────────────────────────────────────────
+flc_label = f"{c['FLC']:.0f} A"
+short_tx = c["Ztx"] < 5.0   # flag if Ztx very small (< 5 Ω primary)
 st.markdown(f"""
-<div style="background:#ffffff;border:1px solid #7ab8d4;border-radius:8px;
-     padding:14px 20px;display:flex;gap:28px;flex-wrap:wrap;margin:16px 0;">
-  <div><span style="font-size:10px;color:#4a7a9b;font-family:IBM Plex Mono">EQUIPMENT</span><br>
-       <span style="font-size:14px;color:#03223a;font-family:IBM Plex Mono;font-weight:700">{equip_name}</span></div>
-  <div><span style="font-size:10px;color:#4a7a9b;font-family:IBM Plex Mono">CONFIGURATION</span><br>
-       <span style="font-size:14px;color:#004d88;font-family:IBM Plex Mono;font-weight:700">{CONFIG_NAMES[config]}</span></div>
-  <div><span style="font-size:10px;color:#4a7a9b;font-family:IBM Plex Mono">MVA / kV</span><br>
-       <span style="font-size:14px;color:#03223a;font-family:IBM Plex Mono;font-weight:700">{mva} MVA / {vkv} kV</span></div>
-  <div><span style="font-size:10px;color:#4a7a9b;font-family:IBM Plex Mono">I_RATED</span><br>
-       <span style="font-size:14px;color:#005a2a;font-family:IBM Plex Mono;font-weight:700">{c['I_rated']:.1f} A</span></div>
-  <div><span style="font-size:10px;color:#4a7a9b;font-family:IBM Plex Mono">IF ({if_mult}×)</span><br>
-       <span style="font-size:14px;color:#8b0000;font-family:IBM Plex Mono;font-weight:700">{c['IF']:.0f} A</span></div>
+<div class="info-bar">
+  <div class="info-item">
+    <div class="lbl">SUBSTATION</div>
+    <div class="val">{sub_name}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">TRANSFORMER</div>
+    <div class="val">{tx_name}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">VOLTAGE</div>
+    <div class="val val-blue">{vhv:.0f}/{vlv:.0f} kV</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">RATING</div>
+    <div class="val val-blue">{mva:.0f} MVA</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">%Z / X/R</div>
+    <div class="val">{pct_z:.1f}% / {xr:.0f}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">CT / VT</div>
+    <div class="val">{ct_pri}/{ct_sec} A · {vt_pri:.0f}kV/{vt_sec}V</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">FLC (HV)</div>
+    <div class="val">{flc_label}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">VECTOR GRP</div>
+    <div class="val">{vg}</div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════
-# SECTION 1 — SYSTEM PARAMETERS
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 1 — SYSTEM PARAMETERS"), unsafe_allow_html=True)
-st.markdown('<div class="rcgrid">' +
-    rcard("I_rated", f"{c['I_rated']:.2f}", "A", f"MVA/(√3×{vkv}kV)") +
-    rcard("IF (Through Fault)", f"{c['IF']:.1f}", "A", f"{if_mult} × I_rated", "red") +
-    rcard("POC (Required)", f"{c['POC']:.2f}", "A", f"{poc_pct:.1f}% × I_rated", "green") +
-    rcard("POC Range", f"{c['POC_min']:.1f}–{c['POC_max']:.1f}", "A", "10–25% of I_rated", "teal") +
-    rcard("POC (secondary)", f"{c['POC_sec']:.5f}", "A sec", f"POC / T = {c['POC']:.2f}/{lct['T']}") +
-'</div>', unsafe_allow_html=True)
-
-with st.expander("📐 Step-by-step — System Parameters"):
-    st.markdown(fbox([
-        ("step", "Step 1: Rated Current of Protected Winding"),
-        ("eq",   f"I_rated = MVA / (√3 × VL) = {mva}×10⁶ / (√3 × {vkv}×10³)"),
-        ("res",  f"I_rated = {c['I_rated']:.2f} A"),
-        ("step", "Step 2: Assigned Through Fault Current (Rated Stability Limit)"),
-        ("eq",   f"IF = {if_mult} × I_rated = {if_mult} × {c['I_rated']:.2f}"),
-        ("res",  f"IF = {c['IF']:.1f} A  [IEC: typically 16 × Irated or 1/Zpu × Irated]"),
-        ("step", "Step 3: Primary Operate Current (Fault Setting)"),
-        ("eq",   f"POC = {poc_pct:.1f}% × {c['I_rated']:.2f} = {c['POC']:.2f} A"),
-        ("eq",   f"Acceptable range: 10–25% of Irated = {c['POC_min']:.1f} – {c['POC_max']:.1f} A"),
-        ("note", "POC is the minimum primary earth fault current the scheme must operate for."),
-    ]), unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# SECTION 2 — STABILITY VOLTAGE
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 2 — STABILITY VOLTAGE LIMITS", "orange"), unsafe_allow_html=True)
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 1 — BASE IMPEDANCES & CT/VT CONVERSION
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("SECTION 1 — BASE IMPEDANCES & CT / VT CONVERSION"), unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 with col1:
-    vs_status = "green" if c["Vs_ok"] else "warn"
-    st.markdown('<div class="rcgrid">' +
-        rcard("Vs_min (LCT)", f"{c['Vs_lct_req']:.2f}", "V", f"IF/T × (RCT+RL) = {c['IF']:.0f}/{lct['T']}×({lct['RCT']}+{lct['RL']})") +
-        (rcard("Vs_min (NCT)", f"{c['Vs_nct_req']:.2f}", "V", "IF/T × (RCT+RL) NCT") if config in [3,4] else "") +
-        (rcard("Vs_min (ECT)", f"{c['Vs_ect_req']:.2f}", "V", "IF/T × (RCT+RL) ECT") if config in [2,4] else "") +
-        rcard("Vs_min REQUIRED", f"{c['Vs_min']:.2f}", "V", "Max of all CT requirements", "red") +
+    st.markdown('<div class="result-grid">' +
+        rcard("Z_base HV", f"{c['Zbase_HV']:.4f}", "Ω primary", f"= V²/MVA = {vhv}²/{mva}") +
+        rcard("Z_transformer", f"{c['Ztx']:.4f}", "Ω primary", f"{pct_z}% × {c['Zbase_HV']:.3f} Ω") +
+        rcard("Z_tx (R + jX)", f"{c['Ztx_R']:.4f} + j{c['Ztx_X']:.4f}", "Ω", f"∠{c['Z1_ang']:.2f}° (MTA)") +
+        rcard("Z_source (Zsys)", f"{c['Zsys']:.4f}", "Ω primary", f"= V²/Fault MVA") +
     '</div>', unsafe_allow_html=True)
 
 with col2:
-    st.markdown('<div class="rcgrid">' +
-        rcard("Vk_min", f"{c['Vk_min']:.0f}", "V", "Minimum knee point voltage") +
-        rcard("Vs_max ALLOWED", f"{c['Vs_max']:.1f}", "V", "Vk_min / 2", "orange") +
-        rcard("Vs_provisional", f"{c['Vs_prov']:.1f}", "V",
-              "✓ In range" if c["Vs_ok"] else "⚠ Check!", vs_status) +
+    st.markdown('<div class="result-grid">' +
+        rcard("CTR", f"{c['CTR']:.0f} : 1", "", f"{ct_pri}/{ct_sec} A") +
+        rcard("PTR (HV referred)", f"{c['PTR']:.0f} : 1", "", f"VT on LV side → ref'd to {vhv:.0f}kV") +
+        rcard("kk = CTR/PTR", f"{c['kk']:.5f}", "conversion factor", "primary Ω → relay sec Ω") +
+        rcard("SIR (Zsys/Ztx)", f"{c['SIR']:.4f}", "—", "Source Impedance Ratio") +
     '</div>', unsafe_allow_html=True)
 
-vs_check_html = f'<div class="alert-ok">✓ Vs range valid: {c["Vs_min"]:.2f} V  &lt;  Vs_prov = {c["Vs_prov"]:.1f} V  ≤  Vs_max = {c["Vs_max"]:.1f} V</div>' \
-    if c["Vs_ok"] else \
-    f'<div class="alert-err">⚠ Vs_prov = {c["Vs_prov"]:.1f} V outside range! Required: {c["Vs_min"]:.2f} V to {c["Vs_max"]:.1f} V. Review CT parameters.</div>'
-st.markdown(vs_check_html, unsafe_allow_html=True)
-
-with st.expander("📐 Step-by-step — Stability Voltage"):
-    col1, col2 = st.columns(2)
-    with col1:
+with st.expander("📐 Step-by-step Formulae — Base Impedances & CT/VT"):
+    c1, c2 = st.columns(2)
+    with c1:
         st.markdown(fbox([
-            ("step", "Minimum Vs — Equation (1) per IEC/Siemens doc"),
-            ("eq",   "Vs ≥ IF × (RCT + RL) / T"),
-            ("eq",   f"[LCT] Vs ≥ {c['IF']:.1f} × ({lct['RCT']} + {lct['RL']}) / {lct['T']}"),
-            ("res",  f"Vs_LCT_min = {c['Vs_lct_req']:.3f} V"),
-            ("eq",   f"Worst case Vs_min = {c['Vs_min']:.3f} V"),
-            ("note", "Assumes one CT fully saturated — worst case gives highest false differential voltage across relay"),
+            ("step", "Step 1: Base Impedance — HV Side (Primary Ω)"),
+            ("eq",   f"Z_base_HV = V_HV² / MVA_rated"),
+            ("eq",   f"= ({vhv} × 10³)² / ({mva} × 10⁶)"),
+            ("eq",   f"= {vhv**2 * 1e6:.2e} / {mva * 1e6:.2e}"),
+            ("res",  f"Z_base_HV = {c['Zbase_HV']:.6f} Ω"),
+            ("step", "Step 2: Transformer Leakage Impedance"),
+            ("eq",   f"Z_tx = (%Z / 100) × Z_base_HV"),
+            ("eq",   f"= ({pct_z} / 100) × {c['Zbase_HV']:.4f}"),
+            ("res",  f"Z_tx = {c['Ztx']:.6f} Ω  ∠{c['Z1_ang']:.3f}°"),
+            ("step", "Step 3: R and X Components"),
+            ("eq",   f"R_tx = Z_tx / √(1 + (X/R)²) = {c['Ztx']:.4f} / √(1+{xr}²)"),
+            ("res",  f"R_tx = {c['Ztx_R']:.6f} Ω"),
+            ("eq",   f"X_tx = X/R × R_tx = {xr} × {c['Ztx_R']:.4f}"),
+            ("res",  f"X_tx = {c['Ztx_X']:.6f} Ω"),
         ]), unsafe_allow_html=True)
-    with col2:
+    with c2:
         st.markdown(fbox([
-            ("step", "Maximum Vs — Equation (2) per IEC/Siemens doc"),
-            ("eq",   "Vs ≤ Vk / 2  (ensures high speed relay operation)"),
-            ("eq",   f"Vs ≤ {c['Vk_min']:.0f} / 2 = {c['Vs_max']:.1f} V"),
-            ("res",  f"Valid range: {c['Vs_min']:.2f} V  <  Vs  ≤  {c['Vs_max']:.1f} V"),
-            ("res",  f"Selected Vs_prov = {c['Vs_prov']:.1f} V"),
-            ("note", "Vs must not exceed Vk/2 to ensure relay operates quickly at the set voltage"),
+            ("step", "Step 4: Source Impedance at HV Bus"),
+            ("eq",   f"Z_sys = V_HV² / Fault_MVA"),
+            ("eq",   f"= {vhv}² × 10⁶ / ({fault_mva} × 10⁶)"),
+            ("res",  f"Z_sys = {c['Zsys']:.6f} Ω"),
+            ("step", "Step 5: CT and VT Ratios"),
+            ("eq",   f"CTR = CT_primary / CT_secondary = {ct_pri} / {ct_sec} = {c['CTR']:.0f}"),
+            ("eq",   f"VT primary referred to HV:"),
+            ("eq",   f"  VTP_ref = VT_pri_kV × (V_HV/V_LV) × 1000"),
+            ("eq",   f"  = {vt_pri} × ({vhv}/{vlv}) × 1000 = {c['PTR'] * vt_sec:.2f} V"),
+            ("eq",   f"PTR = VTP_ref / VT_sec = {c['PTR'] * vt_sec:.2f} / {vt_sec} = {c['PTR']:.2f}"),
+            ("res",  f"PTR = {c['PTR']:.4f}"),
+            ("step", "Step 6: Relay Conversion Factor"),
+            ("eq",   f"kk = CTR / PTR = {c['CTR']:.0f} / {c['PTR']:.2f}"),
+            ("res",  f"kk = {c['kk']:.6f}  (primary Ω → relay secondary Ω)"),
+            ("note", "All relay settings below in secondary Ω = primary Ω × kk"),
         ]), unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════
-# SECTION 3 — MAGNETISING CURRENT @ Vs
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 3 — MAGNETISING CURRENT @ Vs", "teal"), unsafe_allow_html=True)
+with st.expander("📖 Theory & Interview Prep — Transformer Backup Impedance (Under-Impedance)"):
+    st.markdown(tbox("Why Under-Impedance / Backup Impedance for Transformers?", """
+<div class='q'>Q: What is under-impedance (backup impedance) protection for transformers?</div>
+<div class='a'>Under-impedance protection applies a distance/impedance relay on the HV side of the transformer, looking FORWARD into the transformer and LV network. It acts as backup for: (1) transformer internal faults missed by differential protection, (2) LV busbar faults, (3) LV feeder faults where LV protection fails. The relay measures V/I impedance; if it falls inside the Mho circle (i.e. apparent impedance is lower than the reach setting), a trip is issued.</div>
 
-imag_rows = [
-    ("LCT (×3)", f"{c['Imag_lct']*1000:.2f}", f"3 × {c['Imag_lct']*1000:.2f} = {3*c['Imag_lct']*1000:.2f} mA", "interpolate" if lct["method"]=="interpolate" else "entered"),
-]
-if config in [3,4] and nct:
-    imag_rows.append(("NCT (×1)", f"{c['Imag_nct']*1000:.2f}", f"{c['Imag_nct']*1000:.2f} mA", "interpolate" if nct["method"]=="interpolate" else "entered"))
-if config in [2,4] and ect:
-    imag_rows.append(("ECT (×1)", f"{c['Imag_ect']*1000:.2f}", f"{c['Imag_ect']*1000:.2f} mA", "interpolate" if ect["method"]=="interpolate" else "entered"))
+<div class='q'>Q: Why is the relay placed on the HV (400 kV) side?</div>
+<div class='a'>Per IEC 60255-121 and CEA 2010 guidelines, the HV side is the standard location because: (1) CT and VT instrumentation is most accurate on the HV side for large EHV transformers, (2) The relay can measure the full transformer + LV network impedance from this vantage point, (3) Tripping the HV CB also de-energises the transformer completely, (4) The HV bus fault current is higher, improving relay sensitivity.</div>
 
-table_rows = "".join([f"<tr><td>{r[0]}</td><td class='tv'>{r[1]} mA</td><td>{r[2]}</td><td><span class='badge b-blue'>{r[3]}</span></td></tr>" for r in imag_rows])
+<div class='q'>Q: Why is this called "Mho" characteristic?</div>
+<div class='a'>The Mho (admittance) characteristic is a circle on the R-X diagram that passes through the origin. Its diameter equals the zone reach (Z_reach) along the Maximum Torque Angle (MTA) direction. Faults inside the circle → trip. The origin-passing property makes it inherently directional — impedances in the second/third quadrant (behind relay) are always outside the circle.</div>
+
+<div class='q'>Q: What is SIR and how does it affect performance?</div>
+<div class='a'>SIR (Source Impedance Ratio) = Z_source / Z_tx. High SIR means a weak source: during faults, relay voltage drops sharply, reducing accuracy. For Z_tx of {:.3f} Ω and Z_sys of {:.3f} Ω, SIR = {:.2f}. Values above 4 indicate a short (weak) TX for the source; values below 0.5 indicate a strong source. High SIR may require VT correction schemes.</div>
+
+<div class='q'>Q: What is the VT location significance?</div>
+<div class='a'>The VT is on the LV (230 kV) side for safety and cost reasons on large EHV transformers. For impedance calculations, VT primary is referred to HV base: VTP_ref = VTP_LV × (V_HV / V_LV). This correctly maps measured secondary voltages to primary HV impedances.</div>
+""".format(c['Ztx'], c['Zsys'], c['SIR'])), unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — ZONE REACH CALCULATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("SECTION 2 — ZONE REACH CALCULATIONS (MHO CHARACTERISTIC)"), unsafe_allow_html=True)
+
+# Zone summary table
+z3_basis = f"Z_tx + 1.5 × Z_sys = {c['Ztx']:.4f} + {1.5*c['Zsys']:.4f}"
 st.markdown(f"""
-<table class="settable">
-<tr><th>CT Type</th><th>Imag @ Vs={c['Vs_prov']:.0f}V</th><th>Contribution to ΣImag</th><th>Method</th></tr>
-{table_rows}
-<tr style="background:#daeef8"><td><strong>TOTAL ΣImag</strong></td>
-<td class="tr"><strong>{c['sum_Imag']*1000:.3f} mA</strong></td>
-<td colspan="2">Used in POC calculation</td></tr>
+<table class="zone-table">
+<tr>
+  <th>Zone</th><th>Reach %</th><th>Criterion</th>
+  <th>Primary (Ω)</th><th>Secondary (Ω)</th>
+  <th>Timer (s)</th><th>Direction</th><th>Status</th>
+</tr>
+<tr>
+  <td><b>Z1</b></td>
+  <td>{badge("80%","blue")}</td>
+  <td>80% × Z_tx (IEC §6.3.2)</td>
+  <td>{c['Z1r_pri']:.4f}</td><td><b>{c['Z1r_sec']:.5f}</b></td>
+  <td>{c['tZ1']:.1f}</td><td>Forward</td>
+  <td>{badge("INSTANTANEOUS","green")}</td>
+</tr>
+<tr>
+  <td><b>Z2</b></td>
+  <td>{badge("120%","blue")}</td>
+  <td>120% × Z_tx (CEA §4.2.3)</td>
+  <td>{c['Z2r_pri']:.4f}</td><td><b>{c['Z2r_sec']:.5f}</b></td>
+  <td>{c['tZ2']:.2f}</td><td>Forward</td>
+  <td>{badge(f"tZ2 = {c['tZ2']}s","orange")}</td>
+</tr>
+<tr>
+  <td><b>Z3</b></td>
+  <td>{badge(f"{c['Z3_pct']*100:.1f}%","blue")}</td>
+  <td>Z_tx + 1.5×Z_sys (CEA §4.2.4)</td>
+  <td>{c['Z3r_pri']:.4f}</td><td><b>{c['Z3r_sec']:.5f}</b></td>
+  <td>{c['tZ3']:.2f}</td><td>Forward</td>
+  <td>{badge(f"tZ3 = {c['tZ3']}s","warn")}</td>
+</tr>
+<tr>
+  <td><b>Z4</b></td>
+  <td>{badge("20% (Rev)","red")}</td>
+  <td>20% × Z_tx — Reverse (CEA §4.3)</td>
+  <td>{c['Z4r_pri']:.4f}</td><td><b>{c['Z4r_sec']:.5f}</b></td>
+  <td>{c['tZ4']:.2f}</td><td>Reverse</td>
+  <td>{badge("REVERSE","red")}</td>
+</tr>
+</table>
+<div style="margin-top:6px;font-size:11px;font-family:IBM Plex Mono;color:#4a7fa0;">
+MTA (Maximum Torque Angle) = {c['Z1_ang']:.2f}° = arctan(X/R = {xr})  ·
+All secondary values via kk = CTR/PTR = {c['kk']:.5f}
+</div>
+""", unsafe_allow_html=True)
+
+# ── Mho R-X Plot ──────────────────────────────────────────────────────────────
+st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+col_plot, col_steps = st.columns([1.6, 1])
+
+with col_plot:
+    st.markdown("**📊 Mho Characteristic — R-X Plane (Primary Ω, HV referred)**")
+    z1R, z1X, z1Rc, z1Xc = mho_points(c['Z1r_pri'], c['Z1_ang'])
+    z2R, z2X, z2Rc, z2Xc = mho_points(c['Z2r_pri'], c['Z1_ang'])
+    z3R, z3X, z3Rc, z3Xc = mho_points(c['Z3r_pri'], c['Z1_ang'])
+
+    tx_ang  = math.radians(c['Z1_ang'])
+    lim     = c['Z3r_pri'] * 1.35
+    mta_len = c['Z3r_pri'] * 1.2
+
+    traces = [
+        go.Scatter(x=z3R, y=z3X, fill='toself', fillcolor='rgba(220,38,38,0.07)',
+            line=dict(color='#dc2626', width=2, dash='dash'),
+            name=f"Zone 3 — {c['Z3r_pri']:.3f} Ω",
+            hovertemplate='R: %{x:.3f} Ω<br>X: %{y:.3f} Ω<extra>Zone 3</extra>'),
+        go.Scatter(x=z2R, y=z2X, fill='toself', fillcolor='rgba(217,119,6,0.08)',
+            line=dict(color='#d97706', width=2),
+            name=f"Zone 2 — {c['Z2r_pri']:.3f} Ω",
+            hovertemplate='R: %{x:.3f} Ω<br>X: %{y:.3f} Ω<extra>Zone 2</extra>'),
+        go.Scatter(x=z1R, y=z1X, fill='toself', fillcolor='rgba(13,123,191,0.12)',
+            line=dict(color='#0d7bbf', width=2.5),
+            name=f"Zone 1 — {c['Z1r_pri']:.3f} Ω",
+            hovertemplate='R: %{x:.3f} Ω<br>X: %{y:.3f} Ω<extra>Zone 1</extra>'),
+        # Transformer impedance vector
+        go.Scatter(x=[0, c['Ztx_R']], y=[0, c['Ztx_X']],
+            mode='lines+markers',
+            line=dict(color='#059669', width=3),
+            marker=dict(size=[0, 12], color='#059669', symbol=['circle', 'diamond']),
+            name=f"Z_tx = {c['Ztx']:.3f} Ω"),
+        # Source impedance (behind relay — negative direction)
+        go.Scatter(x=[0, -c['Zsys'] * math.cos(tx_ang)],
+                   y=[0, -c['Zsys'] * math.sin(tx_ang)],
+            mode='lines+markers',
+            line=dict(color='#dc2626', width=2, dash='dot'),
+            marker=dict(size=[0, 10], color='#dc2626', symbol=['circle', 'triangle-left']),
+            name=f"Z_sys = {c['Zsys']:.3f} Ω (behind)"),
+        # MTA line
+        go.Scatter(x=[0, mta_len * math.cos(tx_ang)],
+                   y=[0, mta_len * math.sin(tx_ang)],
+            mode='lines', line=dict(color='rgba(10,42,66,0.18)', width=1, dash='longdash'),
+            name=f"MTA = {c['Z1_ang']:.1f}°", hoverinfo='none'),
+        # Origin
+        go.Scatter(x=[0], y=[0], mode='markers',
+            marker=dict(size=12, color='#0a2a42', symbol='cross'),
+            name='Relay Point (Origin)'),
+    ]
+
+    annotations = [
+        dict(x=z1Rc*0.55, y=z1Xc + c['z1_r']*0.5, text='Z1',
+             font=dict(color='#0d7bbf', size=13, family='IBM Plex Mono'), showarrow=False),
+        dict(x=z2Rc*0.45, y=z2Xc + c['z2_r']*0.55, text='Z2',
+             font=dict(color='#d97706', size=13, family='IBM Plex Mono'), showarrow=False),
+        dict(x=z3Rc*0.35, y=z3Xc + c['z3_r']*0.6, text='Z3',
+             font=dict(color='#dc2626', size=13, family='IBM Plex Mono'), showarrow=False),
+    ]
+
+    fig = go.Figure(data=traces)
+    fig.update_layout(
+        paper_bgcolor='#ffffff', plot_bgcolor='#f8fbfd',
+        font=dict(family='IBM Plex Mono', color='#0a2a42', size=11),
+        title=dict(
+            text=f"Mho Char. — {vhv:.0f}/{vlv:.0f}kV {mva:.0f}MVA | MTA={c['Z1_ang']:.1f}° | HV Side Forward",
+            font=dict(color='#0a2a42', size=12), x=0.5),
+        xaxis=dict(title="R (Ω) — Resistance",
+            range=[-lim*0.55, lim], zeroline=True,
+            zerolinecolor='rgba(10,42,66,0.25)', zerolinewidth=1,
+            gridcolor='rgba(122,184,212,0.3)', tickfont=dict(color='#4a7fa0'),
+            titlefont=dict(color='#4a7fa0')),
+        yaxis=dict(title="X (Ω) — Reactance",
+            range=[-lim*0.3, lim*1.05], zeroline=True,
+            zerolinecolor='rgba(10,42,66,0.25)', zerolinewidth=1,
+            gridcolor='rgba(122,184,212,0.3)', tickfont=dict(color='#4a7fa0'),
+            titlefont=dict(color='#4a7fa0'),
+            scaleanchor='x', scaleratio=1),
+        legend=dict(bgcolor='rgba(240,248,252,0.9)', bordercolor='#7ab8d4',
+            borderwidth=1, font=dict(color='#0a2a42', size=10), x=1, xanchor='right', y=0),
+        annotations=annotations, hovermode='closest',
+        margin=dict(l=55, r=10, t=44, b=50), height=480,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+with col_steps:
+    st.markdown("**📐 Zone Reach Formulae**")
+    t_z1, t_z2, t_z3, t_z4 = st.tabs(["Z1", "Z2", "Z3", "Z4"])
+
+    with t_z1:
+        st.markdown(fbox([
+            ("step", "Zone-1 — 80% of Transformer Impedance"),
+            ("eq",   "Z1_reach = 80% × Z_tx  (IEC 60255-121 §6.3.2)"),
+            ("eq",   f"= 0.80 × {c['Ztx']:.6f}"),
+            ("res",  f"Z1_primary = {c['Z1r_pri']:.6f} Ω"),
+            ("eq",   f"Z1_sec = Z1_pri × kk = {c['Z1r_pri']:.4f} × {c['kk']:.5f}"),
+            ("res",  f"Z1_secondary = {c['Z1r_sec']:.6f} Ω"),
+            ("note", f"tZ1 = 0.0 s (instantaneous). 20% margin prevents overreach due to CT/VT errors and relay tolerances."),
+        ]), unsafe_allow_html=True)
+
+    with t_z2:
+        st.markdown(fbox([
+            ("step", "Zone-2 — 120% of Transformer Impedance"),
+            ("eq",   "Z2_reach = 120% × Z_tx  (CEA §4.2.3)"),
+            ("eq",   f"= 1.20 × {c['Ztx']:.6f}"),
+            ("res",  f"Z2_primary = {c['Z2r_pri']:.6f} Ω"),
+            ("eq",   f"Z2_secondary = {c['Z2r_pri']:.4f} × {c['kk']:.5f}"),
+            ("res",  f"Z2_secondary = {c['Z2r_sec']:.6f} Ω"),
+            ("eq",   f"tZ2 = {c['tZ2']} s  (≥ 0.4 s grading — CEA §5.1 for {vhv:.0f}kV class)"),
+            ("note", "Covers 100% of transformer + 20% margin for LV busbar backup."),
+        ]), unsafe_allow_html=True)
+
+    with t_z3:
+        st.markdown(fbox([
+            ("step", "Zone-3 — Remote Backup (CEA §4.2.4)"),
+            ("eq",   "Z3_reach = Z_tx + 1.5 × Z_sys"),
+            ("eq",   f"= {c['Ztx']:.4f} + 1.5 × {c['Zsys']:.4f}"),
+            ("eq",   f"= {c['Ztx']:.4f} + {1.5*c['Zsys']:.4f}"),
+            ("res",  f"Z3_primary = {c['Z3r_pri']:.6f} Ω"),
+            ("eq",   f"Z3_secondary = {c['Z3r_pri']:.4f} × {c['kk']:.5f}"),
+            ("res",  f"Z3_secondary = {c['Z3r_sec']:.6f} Ω"),
+            ("eq",   f"tZ3 = {c['tZ3']} s  (400kV class — CEA §5.1)"),
+            ("note", "1.5× factor on Z_sys provides margin against fault level reduction over years."),
+        ]), unsafe_allow_html=True)
+
+    with t_z4:
+        st.markdown(fbox([
+            ("step", "Zone-4 — Reverse Zone (CEA §4.3)"),
+            ("eq",   "Z4_reach = 20% × Z_tx  (reverse direction)"),
+            ("eq",   f"= 0.20 × {c['Ztx']:.6f}"),
+            ("res",  f"Z4_primary = {c['Z4r_pri']:.6f} Ω"),
+            ("res",  f"Z4_secondary = {c['Z4r_sec']:.6f} Ω"),
+            ("note", "Used for HV busbar backup and current reversal guard in POTT schemes. tZ4 = 0.5 s."),
+        ]), unsafe_allow_html=True)
+
+with st.expander("📖 Theory & Interview Prep — Zone Reaches for Transformer"):
+    st.markdown(tbox("Distance Zone Philosophy for EHV Transformer", """
+<div class='q'>Q: Why is Zone-1 set at 80% of transformer impedance?</div>
+<div class='a'>The 20% margin accounts for measurement uncertainties: CT class (0.5–1P), VT class (0.5–1P), relay measurement accuracy (typically ±5%), and transformer impedance variation with tap position (±10% variation is common for on-load tap changers). Setting Zone-1 at 80% ensures it NEVER overreaches beyond the transformer for any combination of these errors — eliminating false trips for through-faults on the LV network.</div>
+
+<div class='q'>Q: Why does Zone-2 set at 120% (not 150%)?</div>
+<div class='a'>120% covers the entire transformer (100%) with a 20% overreach into the LV busbar. This ensures Zone-2 backs up the last 20% not covered by Zone-1. Setting higher (150%+) risks encroachment into the LV feeder Zone-1 reach, causing coordination issues. The 0.5 s delay provides time for LV bus protection to clear LV faults first.</div>
+
+<div class='q'>Q: What is the logic behind Zone-3 = Z_tx + 1.5 × Z_sys?</div>
+<div class='a'>Zone-3 provides remote backup for faults beyond the LV bus (on LV feeders). Z_tx covers the transformer; 1.5 × Z_sys provides reach into the LV network equivalent to 1.5 times the source impedance. The 1.5 factor ensures coverage even if fault level drops 33% due to system changes (outage of parallel sources), maintaining adequate reach under all system conditions.</div>
+
+<div class='q'>Q: What is the purpose of Zone-4 (reverse zone) for transformers?</div>
+<div class='a'>Zone-4 looks backward toward the HV busbar. It is used for: (1) HV busbar backup protection — provides backup trip if busbar protection (BBP) fails, (2) Current reversal guard in PUTT/POTT teleprotection schemes — prevents unwanted tripping when current direction reverses during fault clearance on parallel feeders, (3) Detecting close-in busbar faults that may have very low impedance to the relay.</div>
+
+<div class='q'>Q: How does MTA (Maximum Torque Angle) affect the Mho characteristic?</div>
+<div class='a'>MTA defines the direction of maximum sensitivity of the Mho circle on the R-X diagram. For a transformer, MTA is set equal to the impedance angle of the transformer (arctan(X/R)), typically 80–87° for large EHV transformers. This ensures the Mho circle is aligned along the fault impedance direction, maximising coverage for internal faults while minimising the risk of encroachment on load impedances (which lie at 20–30° angles).</div>
+"""), unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 3 — STANDBY EARTH FAULT (SEF)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("SECTION 3 — STANDBY EARTH FAULT (SEF) / BACKUP DEF SETTINGS", "sef"),
+            unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown('<div class="result-grid">' +
+        rcard("IN>1 Pickup (sec)", f"{c['Is_sec']:.4f}", "A secondary",
+              f"= {c['Is_pri']:.2f} A primary  ({c['Is_pct']*100:.0f}% FLC)", "sef") +
+        rcard("Operating Time", f"{c['t_op']:.2f}", "seconds",
+              f"tZ3 ({c['tZ3']}s) + 0.1s grading margin", "sef") +
+        rcard("If / Is Ratio", f"{c['ratio']:.4f}", "—",
+              f"{if1_lv}A / {c['Is_pri']:.2f}A", "sef") +
+        rcard("TMS (IEC S-Inverse)", f"{c['TMS']:.6f}", "",
+              "Normal Inverse curve (NI)", "sef") +
+    '</div>', unsafe_allow_html=True)
+
+with col2:
+    st.markdown('<div class="result-grid">' +
+        rcard("Char. Angle",     "-45°", "degrees", "Standard SEF angle", "sef") +
+        rcard("Polarisation",   "NEG. SEQ.", "I₂ / V₂",
+              "Negative sequence polarisation", "sef") +
+        rcard("I2pol Threshold", f"{c['I2pol_ma']}", "mA secondary",
+              "Min I₂ for directionality", "sef") +
+        rcard("V2pol Threshold", f"{c['V2pol']:.3f}", "V secondary",
+              "5% of VT_sec/√3", "sef") +
+    '</div>', unsafe_allow_html=True)
+
+with st.expander("📐 Step-by-step Formulae — SEF TMS Calculation"):
+    st.markdown(fbox([
+        ("step", "Step 1: SEF Pickup Current — 20% of Full Load Current"),
+        ("eq",   f"FLC_HV = MVA × 10⁶ / (√3 × V_HV × 10³)"),
+        ("eq",   f"= {mva} × 10⁶ / (1.732 × {vhv} × 10³) = {c['FLC']:.2f} A"),
+        ("eq",   f"Is_primary = 20% × FLC = 0.20 × {c['FLC']:.2f}"),
+        ("res",  f"Is_primary = {c['Is_pri']:.4f} A"),
+        ("eq",   f"Is_secondary = Is_pri / CTR = {c['Is_pri']:.4f} / {c['CTR']:.0f}"),
+        ("res",  f"Is_secondary = {c['Is_sec']:.6f} A"),
+        ("step", "Step 2: Operating Time — Coordinate Above Zone-3"),
+        ("eq",   f"t_op = tZ3 + 0.1s = {c['tZ3']} + 0.1"),
+        ("res",  f"t_op = {c['t_op']:.2f} s"),
+        ("note", "0.1 s margin above Zone-3 ensures SEF does not interfere with impedance zone tripping"),
+        ("step", "Step 3: Fault Current Ratio (If / Is)"),
+        ("eq",   f"ratio = If_1ph_LV / Is_primary = {if1_lv} / {c['Is_pri']:.4f}"),
+        ("res",  f"ratio = {c['ratio']:.6f}"),
+        ("step", "Step 4: TMS — IEC Normal Inverse (Standard Inverse) Curve"),
+        ("eq",   "t = TMS × 0.14 / [(If/Is)^0.02 − 1]  →  TMS = t × [(If/Is)^0.02 − 1] / 0.14"),
+        ("eq",   f"TMS = {c['t_op']} × [{c['ratio']:.4f}^0.02 − 1] / 0.14"),
+        ("eq",   f"TMS = {c['t_op']} × [{c['ratio']**0.02:.6f} − 1] / 0.14"),
+        ("eq",   f"TMS = {c['t_op']} × {(c['ratio']**0.02 - 1):.6f} / 0.14"),
+        ("res",  f"TMS = {c['TMS']:.6f}"),
+        ("step", "Step 5: V2pol (Negative Sequence VT Threshold)"),
+        ("eq",   f"V2pol = 5% × (VT_sec / √3) = 0.05 × ({vt_sec} / 1.732)"),
+        ("res",  f"V2pol = {c['V2pol']:.4f} V"),
+    ]), unsafe_allow_html=True)
+
+with st.expander("📖 Theory & Interview Prep — SEF / Standby Earth Fault"):
+    st.markdown(tbox("Standby Earth Fault Protection for EHV Transformers", """
+<div class='q'>Q: What is the difference between REF (Restricted Earth Fault) and SEF (Standby Earth Fault)?</div>
+<div class='a'>REF (Restricted Earth Fault) is a HIGH-SPEED, HIGH-SENSITIVITY differential-type protection using the Merz-Price circulating current principle. It only detects earth faults within the transformer winding — it is "restricted" to the protected zone bounded by CTs. SEF (Standby Earth Fault) is a BACKUP, SLOWER IDMT overcurrent element on the residual (zero-sequence) current. SEF catches faults that REF misses (e.g., faults outside the REF zone, REF CT saturation, REF equipment failure). Both are necessary for complete transformer earth fault protection.</div>
+
+<div class='q'>Q: Why is the SEF pickup set at 20% of FLC?</div>
+<div class='a'>Earth fault current magnitude depends on system earthing and fault path resistance. For solidly earthed HV transformers (typical for 400 kV), single-phase-to-earth fault current can reach 50-100% of the 3-phase fault current. Setting pickup at 20% of FLC (full load current) ensures: (1) Detection of relatively low-current HIF (high impedance faults) in windings, (2) Sufficient margin above load unbalance (typically < 5% for balanced loads), (3) Coordination with LV REF element which has higher sensitivity.</div>
+
+<div class='q'>Q: Why use negative sequence polarisation (I2/V2) instead of zero sequence (I0/V0)?</div>
+<div class='a'>Negative sequence polarisation has key advantages: (1) Not affected by zero-sequence mutual coupling between parallel transformers sharing the same HV bus, (2) Remains available even during close-in faults where V0 at the relay may be very small (solidly earthed buses), (3) Not corrupted by healthy-state load unbalance in the zero-sequence network, (4) More reliable for transformers with delta-connected windings where zero sequence is blocked.</div>
+
+<div class='q'>Q: What is the significance of the −45° characteristic angle?</div>
+<div class='a'>For earth faults on transformer HV windings, the fault current leads the residual voltage by approximately 45–60° (depending on the X/R ratio and earthing impedance). Setting the characteristic angle at −45° (the maximum torque direction) means the relay is most sensitive when IN lags V_polarising by 45° — matching typical transformer earth fault conditions. Incorrect angle setting can cause under-reach (miss faults) or incorrect directionality.</div>
+
+<div class='q'>Q: Explain the IEC Standard Inverse (Normal Inverse) IDMT curve used for TMS.</div>
+<div class='a'>Operating time = TMS × 0.14 / [(If/Is)^0.02 − 1]. This is IEC 60255-151 Standard Inverse characteristic. As fault current increases beyond the pickup, operating time decreases with a moderate inverse slope (exponent 0.02). This provides: (1) Faster operation for severe close-in faults, (2) Slower operation for weak distant faults, allowing downstream protections time to operate first. For backup SEF, the Normal Inverse curve gives better coordination margin compared to Very Inverse or Extremely Inverse curves.</div>
+"""), unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 4 — LOAD ENCROACHMENT / BLINDER
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("SECTION 4 — LOAD ENCROACHMENT / BLINDER CHECK", "load"),
+            unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown('<div class="result-grid">' +
+        rcard("FLC (HV side)", f"{c['FLC']:.1f}", "A", f"MVA/(√3 × {vhv}kV)", "load") +
+        rcard("I_max (1.5× FLC)", f"{c['I_max']:.1f}", "A", f"1.5 × {i_nom}", "load") +
+        rcard("Min Load R (Primary)", f"{c['Rload_pri']:.4f}", "Ω primary",
+              f"0.85 × Vph / I_max", "load") +
+        rcard("Min Load R (Secondary)", f"{c['Rload_sec']:.5f}", "Ω secondary",
+              f"Rload_pri × kk", "load") +
+    '</div>', unsafe_allow_html=True)
+
+with col2:
+    encroach_badge = badge("⚠ RISK", "warn") if c["load_encroach_risk"] else badge("✓ SAFE", "green")
+    st.markdown('<div class="result-grid">' +
+        rcard("Z< Blinder (secondary)", f"{c['Z_blinder_sec']:.5f}", "Ω secondary",
+              "= Min Load R secondary", "load") +
+        rcard("Load Angle", "30°", "fixed", "Standard PF angle for transmission", "load") +
+        rcard("Z3/Blinder Ratio", f"{c['Z3_vs_load']:.4f}", "—",
+              "Z3_sec / Rload_sec",
+              "warn" if c["load_encroach_risk"] else "load") +
+        rcard("Encroachment Risk", encroach_badge, "",
+              f"Ratio {'> 0.8 ⚠ Enable blinder!' if c['load_encroach_risk'] else '≤ 0.8 ✓ No blinder needed'}",
+              "warn" if c["load_encroach_risk"] else "load") +
+    '</div>', unsafe_allow_html=True)
+
+with st.expander("📐 Step-by-step Formulae — Load Encroachment Check"):
+    st.markdown(fbox([
+        ("step", "Step 1: Full Load Current (HV side)"),
+        ("eq",   f"FLC = MVA × 10⁶ / (√3 × V_HV × 10³)"),
+        ("eq",   f"= {mva} × 10⁶ / (1.732 × {vhv} × 10³)"),
+        ("res",  f"FLC = {c['FLC']:.4f} A"),
+        ("step", "Step 2: Maximum Loading Current (1.5× nominal)"),
+        ("eq",   f"I_max = 1.5 × I_nominal = 1.5 × {i_nom}"),
+        ("res",  f"I_max = {c['I_max']:.2f} A"),
+        ("step", "Step 3: Minimum Phase Voltage (85% depressed voltage)"),
+        ("eq",   f"V_ph_min = 0.85 × (V_HV × 10³ / √3) = 0.85 × {vhv*1000:.0f}/1.732"),
+        ("res",  f"V_ph_min = {c['V_ph_min']:.2f} V"),
+        ("step", "Step 4: Minimum Load Resistance (Primary Ω)"),
+        ("eq",   f"R_load_primary = V_ph_min / I_max = {c['V_ph_min']:.2f} / {c['I_max']:.2f}"),
+        ("res",  f"R_load_primary = {c['Rload_pri']:.6f} Ω"),
+        ("eq",   f"R_load_secondary = R_load_pri × kk = {c['Rload_pri']:.4f} × {c['kk']:.5f}"),
+        ("res",  f"R_load_secondary = {c['Rload_sec']:.6f} Ω"),
+        ("step", "Step 5: Load Encroachment Check"),
+        ("eq",   f"Z3_reach_sec / R_load_sec = {c['Z3r_sec']:.5f} / {c['Rload_sec']:.5f}"),
+        ("res",  f"Ratio = {c['Z3_vs_load']:.5f}  →  "
+                 f"{'⚠ > 0.8: Z3 MAY ENCROACH on load. Enable quadrilateral blinder!' if c['load_encroach_risk'] else '✓ ≤ 0.8: Z3 safe from load impedance region'}"),
+    ]), unsafe_allow_html=True)
+
+with st.expander("📖 Theory & Interview Prep — Load Encroachment for Transformer"):
+    st.markdown(tbox("Load Encroachment in Transformer Backup Impedance Protection", """
+<div class='q'>Q: How can heavy load cause a transformer backup impedance relay to mal-trip?</div>
+<div class='a'>The backup impedance relay measures apparent impedance Z_app = V/I. Under maximum load (high current, low voltage), Z_app = V_phase_min / I_max can fall inside Zone-3 of the Mho characteristic. The relay cannot distinguish heavy load from a high-impedance fault within Zone-3, potentially causing an unwanted trip of the transformer — a very consequential event for the power system.</div>
+
+<div class='q'>Q: Why use 85% voltage and 1.5× nominal current for the load calculation?</div>
+<div class='a'>85% voltage represents the minimum allowable system voltage under stressed conditions (post-fault voltage depression, maximum active power transfer). 1.5× nominal current represents transformer overload during emergencies (most transformers are rated for short-term overloads of 120-150% of nameplate). Using these simultaneous worst-case values gives Z_load_min = 0.85 Vph / 1.5 I_nom, which is the true minimum load impedance the relay might see without a fault.</div>
+
+<div class='q'>Q: What is the 0.8 criterion (Z3/Rload ratio)?</div>
+<div class='a'>A ratio of Z3/Rload < 0.8 means Zone-3 stays 20% away from the minimum load impedance boundary — providing 20% security margin for measurement errors and unexpected load extremes. If the ratio exceeds 0.8, Zone-3 is at risk of intersecting the load impedance region and a load blinder (resistive boundary) must be enabled on the relay to cut off the Mho circle at the load region boundary.</div>
+
+<div class='q'>Q: What is a load blinder for a Mho relay?</div>
+<div class='a'>A load blinder is a straight-line resistive boundary on the R-X diagram, set at R = R_load (the minimum load resistance). Any impedance vector with R > R_blinder is classified as "load" and is excluded from the Mho tripping decision, even if it falls geometrically inside the Mho circle. This is implemented as the "R-reach" parameter in modern numerical relays with quadrilateral or modified Mho characteristics.</div>
+"""), unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 5 — POWER SWING BLOCK (PSB)
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("SECTION 5 — POWER SWING BLOCK (PSB) SETTINGS", "psb"),
+            unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown('<div class="result-grid">' +
+        rcard("Zs (Source Imp., sec)", f"{c['Zs_sec']:.5f}", "Ω secondary",
+              f"= {c['Zs_pri']:.4f} Ω primary", "psb") +
+        rcard("Inner Blinder (RLdInFw)", f"{c['RLdInFw']:.5f}", "Ω secondary",
+              "R_load_sec / 2", "psb") +
+        rcard("Outer Blinder (RLdOutFw)", f"{c['RLdOutFw']:.5f}", "Ω secondary",
+              "From δ_out calculation", "psb") +
+        rcard("Delta R (Separation)", f"{c['Delta_R']:.5f}", "Ω secondary",
+              "RLdOutFw − RLdInFw", "psb") +
+    '</div>', unsafe_allow_html=True)
+
+with col2:
+    st.markdown('<div class="result-grid">' +
+        rcard("δ_in (Entry angle)", f"{c['delta_in']:.3f}", "degrees",
+              "2 × arctan(Zs / 2·RLdInFw)", "psb") +
+        rcard("δ_out (Exit angle)", f"{c['delta_out']:.3f}", "degrees",
+              "δ_in − tP1 × f_sw × 360", "psb") +
+        rcard("Swing Frequency", f"{f_swing}", "Hz", "User input", "psb") +
+        rcard("PSB Timer", "50 ms", "milliseconds", "Fixed standard (CEA)", "psb") +
+    '</div>', unsafe_allow_html=True)
+
+with st.expander("📐 Step-by-step Formulae — PSB Blinder Calculation"):
+    st.markdown(fbox([
+        ("step", "Step 1: Source Impedance from 3-ph Fault MVA"),
+        ("eq",   f"If_3ph = Fault_MVA × 10⁶ / (√3 × V_HV × 10³)"),
+        ("eq",   f"= {fault_mva} × 10⁶ / (1.732 × {vhv} × 10³) = {c['If3_A']:.2f} A"),
+        ("eq",   f"V_base = V_HV × 10³ / √3 = {vhv*1000:.0f} / 1.732 = {vhv*1000/math.sqrt(3):.2f} V"),
+        ("eq",   f"Zs_primary = V_base / If_3ph = {vhv*1000/math.sqrt(3):.2f} / {c['If3_A']:.2f}"),
+        ("res",  f"Zs_primary = {c['Zs_pri']:.6f} Ω"),
+        ("eq",   f"Zs_secondary = Zs_pri × kk = {c['Zs_pri']:.4f} × {c['kk']:.5f}"),
+        ("res",  f"Zs_secondary = {c['Zs_sec']:.6f} Ω"),
+        ("step", "Step 2: Inner Blinder (RLdInFw)"),
+        ("eq",   f"RLdInFw = R_load_secondary / 2 = {c['Z_blinder_sec']:.5f} / 2"),
+        ("res",  f"RLdInFw = {c['RLdInFw']:.6f} Ω"),
+        ("step", "Step 3: Entry Angle δ_in"),
+        ("eq",   "δ_in = 2 × arctan(Zs_sec / (2 × RLdInFw))"),
+        ("eq",   f"= 2 × arctan({c['Zs_sec']:.5f} / (2 × {c['RLdInFw']:.5f}))"),
+        ("res",  f"δ_in = {c['delta_in']:.4f}°"),
+        ("step", "Step 4: Exit Angle δ_out (tP1 = 1 s assumed)"),
+        ("eq",   "δ_out = δ_in − tP1 × f_swing × 360"),
+        ("eq",   f"= {c['delta_in']:.4f} − 1 × {f_swing} × 360"),
+        ("res",  f"δ_out = {c['delta_out']:.4f}°"),
+        ("step", "Step 5: Outer Blinder (RLdOutFw)"),
+        ("eq",   "RLdOutFw = Zs_sec / (2 × tan(|δ_out| / 2))"),
+        ("res",  f"RLdOutFw = {c['RLdOutFw']:.6f} Ω"),
+        ("step", "Step 6: Blinder Separation ΔR"),
+        ("eq",   f"ΔR = RLdOutFw − RLdInFw = {c['RLdOutFw']:.5f} − {c['RLdInFw']:.5f}"),
+        ("res",  f"ΔR = {c['Delta_R']:.6f} Ω"),
+        ("note", "PSB timer = 50 ms. Impedance crossing both blinders in < 50 ms → FAULT (allow trip). > 50 ms → SWING (block trip)."),
+    ]), unsafe_allow_html=True)
+
+with st.expander("📖 Theory & Interview Prep — Power Swing Block for Transformer"):
+    st.markdown(tbox("Power Swing Block (PSB) — Transformer Backup Relay", """
+<div class='q'>Q: Why is PSB needed for a transformer backup impedance relay?</div>
+<div class='a'>During system disturbances (fault clearance, sudden load rejection), the power angle between connected systems oscillates — creating a power swing. The apparent impedance seen by the relay sweeps across the R-X diagram. If this sweep trajectory passes through Zone-2 or Zone-3 of the Mho characteristic, the relay may trip the transformer — disconnecting a healthy power transformer and potentially worsening the disturbance. PSB prevents this by distinguishing fast-moving fault impedance from slow-moving swing impedance.</div>
+
+<div class='q'>Q: How does the PSB detect a swing vs a real fault?</div>
+<div class='a'>The key diagnostic is RATE OF IMPEDANCE CHANGE: Real fault: impedance jumps from load region (high R, low X) to fault region (low R, high X) in < 1–2 ms — INSTANTANEOUS. Power swing: impedance moves gradually along a curved locus at 5–100 Ω/s depending on swing frequency. PSB uses TWO concentric blinder lines (outer and inner). If the impedance takes > 50 ms to traverse from outer to inner blinder → SWING classified → zones blocked. If traversal < 50 ms → FAULT classified → tripping allowed.</div>
+
+<div class='q'>Q: Where is the electrical centre of a power swing for a transformer?</div>
+<div class='a'>The electrical centre (point of 180° phase angle between two systems) lies on the impedance locus where the voltage is theoretically zero. For a transformer connecting two buses, it lies at Z = Z_source_HV / (Z_source_HV + Z_tx + Z_source_LV) × (Z_tx + Z_source_LV). If Z_source_HV ≈ Z_source_LV, the centre is approximately at Z_tx/2 — inside the transformer impedance. This is why Zone-2 and Zone-3 of the transformer relay are the most vulnerable to swing encroachment.</div>
+
+<div class='q'>Q: What is the significance of swing frequency (1.5 Hz default)?</div>
+<div class='a'>Swing frequency (slip frequency) is the oscillation rate of the power angle, typically 0.3–2 Hz for inter-area modes. At 1.5 Hz: one cycle = 667 ms, half-cycle = 333 ms. The PSB timer of 50 ms is much less than 333 ms — ensuring the relay can distinguish a genuine fault (< 5 ms impedance change) from a swing (≥ 50 ms) with good margin. Higher swing frequency → impedance moves faster → if frequency exceeds ~6 Hz, PSB may mis-classify swings as faults.</div>
+
+<div class='q'>Q: What is δ_in and δ_out?</div>
+<div class='a'>δ_in (entry angle) is the power angle at which the impedance locus enters the INNER PSB blinder. It is calculated from the geometry of the source impedances and blinder settings. δ_out (exit angle) is the expected power angle when the locus exits the OUTER blinder — accounting for one half-cycle of the swing (tP1 × f_sw × 360°). If δ_out is positive and less than 180°, the system may recover (stable swing). If δ_out exceeds 180°, the swing is unstable (pole slip) and OST (Out-of-Step Tripping) should activate.</div>
+"""), unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COMPLETE SETTINGS SUMMARY
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown(sec("COMPLETE SETTINGS SUMMARY — EHV TRANSFORMER BACKUP IMPEDANCE", "sum"),
+            unsafe_allow_html=True)
+
+st.markdown(f"""
+<table class="zone-table">
+<tr>
+  <th>Parameter</th><th>Primary (Ω)</th><th>Secondary (Ω)</th>
+  <th>Timer / Value</th><th>Standard / Clause</th><th>Notes</th>
+</tr>
+<tr>
+  <td><b>Z_base HV</b></td>
+  <td>{c['Zbase_HV']:.4f}</td><td>—</td><td>—</td>
+  <td>—</td><td>V_HV² / MVA</td>
+</tr>
+<tr>
+  <td><b>Z_transformer</b></td>
+  <td>{c['Ztx']:.4f}</td><td>—</td>
+  <td>∠{c['Z1_ang']:.2f}° / MTA</td>
+  <td>—</td><td>{pct_z}% × Z_base — leakage impedance</td>
+</tr>
+<tr>
+  <td><b>Zone 1</b></td>
+  <td>{c['Z1r_pri']:.4f}</td><td><b>{c['Z1r_sec']:.5f}</b></td>
+  <td>{c['tZ1']:.1f} s</td>
+  <td>IEC 60255-121 §6.3.2</td><td>80% Z_tx — Instantaneous, Forward</td>
+</tr>
+<tr>
+  <td><b>Zone 2</b></td>
+  <td>{c['Z2r_pri']:.4f}</td><td><b>{c['Z2r_sec']:.5f}</b></td>
+  <td>{c['tZ2']:.2f} s</td>
+  <td>CEA §4.2.3</td><td>120% Z_tx — Forward</td>
+</tr>
+<tr>
+  <td><b>Zone 3</b></td>
+  <td>{c['Z3r_pri']:.4f}</td><td><b>{c['Z3r_sec']:.5f}</b></td>
+  <td>{c['tZ3']:.2f} s</td>
+  <td>CEA §4.2.4</td><td>Z_tx + 1.5×Z_sys — Remote backup, Forward</td>
+</tr>
+<tr>
+  <td><b>Zone 4 (Reverse)</b></td>
+  <td>{c['Z4r_pri']:.4f}</td><td><b>{c['Z4r_sec']:.5f}</b></td>
+  <td>{c['tZ4']:.2f} s</td>
+  <td>CEA §4.3</td><td>20% Z_tx — Reverse (busbar backup)</td>
+</tr>
+<tr>
+  <td><b>MTA (Char. Angle)</b></td>
+  <td colspan="2">{c['Z1_ang']:.3f}°</td>
+  <td>—</td><td>IEC 60255-121 §5.2</td>
+  <td>arctan(X/R = {xr}) — aligned to Z_tx angle</td>
+</tr>
+<tr>
+  <td><b>CTR</b></td>
+  <td colspan="2">{c['CTR']:.0f} : 1</td><td>—</td><td>IEC 61869-2</td><td>{ct_pri}/{ct_sec} A</td>
+</tr>
+<tr>
+  <td><b>PTR (HV referred)</b></td>
+  <td colspan="2">{c['PTR']:.2f} : 1</td><td>—</td><td>IEC 61869-3</td>
+  <td>VT on LV side, referred to {vhv:.0f} kV</td>
+</tr>
+<tr>
+  <td><b>kk = CTR/PTR</b></td>
+  <td colspan="2">{c['kk']:.6f}</td><td>—</td><td>—</td>
+  <td>Primary Ω → relay secondary Ω factor</td>
+</tr>
+<tr>
+  <td><b>IN>1 SEF Pickup</b></td>
+  <td>{c['Is_pri']:.3f} A</td><td>{c['Is_sec']:.5f} A</td>
+  <td>—</td><td>CEA §6.2</td><td>20% FLC — Standby E/F pickup</td>
+</tr>
+<tr>
+  <td><b>SEF TMS</b></td>
+  <td colspan="2">{c['TMS']:.6f}</td>
+  <td>IEC NI curve</td><td>IEC 60255-151</td><td>Normal Inverse, t_op = {c['t_op']:.2f}s</td>
+</tr>
+<tr>
+  <td><b>Load Blinder (sec)</b></td>
+  <td>{c['Rload_pri']:.4f}</td><td>{c['Z_blinder_sec']:.5f}</td>
+  <td>30° angle</td><td>—</td>
+  <td>{'⚠ Z3/Blinder=' + f"{c['Z3_vs_load']:.3f}" + ' > 0.8 — ENABLE BLINDER' if c['load_encroach_risk'] else '✓ Z3/Blinder=' + f"{c['Z3_vs_load']:.3f}" + ' ≤ 0.8 — Safe'}</td>
+</tr>
+<tr>
+  <td><b>PSB Inner (RLdInFw)</b></td>
+  <td>—</td><td>{c['RLdInFw']:.5f}</td>
+  <td>50 ms</td><td>CEA §7 / IEC §9</td><td>Inner blinder</td>
+</tr>
+<tr>
+  <td><b>PSB Outer (RLdOutFw)</b></td>
+  <td>—</td><td>{c['RLdOutFw']:.5f}</td>
+  <td>50 ms</td><td>CEA §7</td><td>ΔR = {c['Delta_R']:.5f} Ω</td>
+</tr>
 </table>
 """, unsafe_allow_html=True)
 
-with st.expander("📐 Imag Interpolation — Calibrated CT Magnetising Curve"):
-    st.markdown(fbox([
-        ("step", "Calibrated piecewise-linear magnetising curve (IEC 60044 Class PX)"),
-        ("eq",   "Factor table: ratio=Vs/Vk → Imag_factor (fraction of Imag@Vk)"),
-        ("eq",   "0.0→0%, 0.1→4%, 0.2→10%, 0.3→17%, 0.4→25%, 0.5→38%"),
-        ("eq",   "0.6→52%, 0.7→66%, 0.8→80%, 0.9→91%, 1.0→100%"),
-        ("eq",   f"[LCT] ratio = {c['Vs_prov']:.1f}/{lct['Vk']:.0f} = {c['Vs_prov']/lct['Vk']:.4f}"),
-        ("res",  f"Imag_LCT @ Vs = {c['Imag_lct']*1000:.3f} mA"),
-        ("note", "Class PX CT: Vk is the kneepoint where 10% increase in voltage gives 50% increase in excitation current. Curve is non-linear — steeply rising near Vk."),
-    ]), unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# SECTION 4 — RELAY SETTING & RSTAB
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 4 — RELAY SETTING CURRENT & STABILISING RESISTOR", "green"), unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown('<div class="rcgrid">' +
-        rcard("Is (ideal calc)", f"{c['Is_ideal']*1000:.2f}", "mA",
-              f"POC_sec − ΣImag = {c['POC_sec']*1000:.2f}−{c['sum_Imag']*1000:.2f}") +
-        rcard("Is (applied)", f"{c['Is']*1000:.2f}", "mA",
-              "Relay setting current", "green") +
-        rcard("Rstab (calculated)", f"{c['Rstab_raw']:.1f}", "Ω",
-              f"Vs / Is = {c['Vs_prov']:.1f}/{c['Is']:.5f}") +
-        rcard("Rstab (standard)", f"{c['Rstab_std']}", "Ω",
-              "Rounded to nearest 50Ω", "green") +
-    '</div>', unsafe_allow_html=True)
-
-with col2:
-    final_ok = c["Vs_final_ok"]
-    st.markdown('<div class="rcgrid">' +
-        rcard("Vs (actual)", f"{c['Vs_actual']:.2f}", "V",
-              f"Rstab_std × Is = {c['Rstab_std']}×{c['Is']:.5f}",
-              "green" if final_ok else "warn") +
-        rcard("POC (actual)", f"{c['POC_actual']:.2f}", "A",
-              c["poc_formula"], "green") +
-        rcard("Vk required", f"{c['Vk_required']:.1f}", "V",
-              "2 × Vs_actual", "teal") +
-        rcard("Vk_LCT check", f"{'✓ PASS' if c['Vk_check'] else '⚠ FAIL'}",
-              f"Vk={lct['Vk']}V, need≥{c['Vk_required']:.0f}V",
-              "", "green" if c["Vk_check"] else "red") +
-    '</div>', unsafe_allow_html=True)
-
-vs_act_alert = f'<div class="alert-ok">✓ Final Vs = {c["Vs_actual"]:.2f} V — within stability range [{c["Vs_min"]:.2f}V, {c["Vs_max"]:.1f}V]</div>' \
-    if final_ok else \
-    f'<div class="alert-warn">⚠ Vs_actual = {c["Vs_actual"]:.2f} V may be outside range. Consider adjusting Is or selecting next standard Rstab.</div>'
-st.markdown(vs_act_alert, unsafe_allow_html=True)
-
-with st.expander("📐 Step-by-step — Is and Rstab"):
-    st.markdown(fbox([
-        ("step", "Step 1: Required relay setting current Is"),
-        ("eq",   f"POC = {c['poc_formula']}"),
-        ("eq",   f"Is = POC × T − ΣImag = {c['POC']:.3f}/{lct['T']}×{lct['T']} − {c['sum_Imag']*1000:.3f}mA"),
-        ("eq",   f"Is_ideal = {c['POC_sec']*1000:.3f} mA − {c['sum_Imag']*1000:.3f} mA"),
-        ("res",  f"Is_ideal = {c['Is_ideal']*1000:.3f} mA → Applied Is = {c['Is']*1000:.3f} mA"),
-        ("step", "Step 2: Stabilising Resistor"),
-        ("eq",   f"Rstab = Vs_prov / Is = {c['Vs_prov']:.1f} / {c['Is']:.6f}"),
-        ("res",  f"Rstab_calc = {c['Rstab_raw']:.2f} Ω → Standard = {c['Rstab_std']} Ω"),
-        ("eq",   f"Vs_actual = {c['Rstab_std']} × {c['Is']:.6f} = {c['Vs_actual']:.3f} V"),
-        ("note", "Rstab is in SERIES with relay for 7SR type. For 7PG23 type use shunt Rshunt = Vs/Ishunt."),
-    ]), unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# SECTION 5 — METROSIL
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 5 — METROSIL (NON-LINEAR RESISTOR)", "purple"), unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown('<div class="rcgrid">' +
-        rcard("P1SEC Metrosil", f"{c['P1SEC_metro']:.0f}", "W",
-              "(4/π) × IF × (1/T) × Vk_min", "purple") +
-        rcard("Metrosil Size", c["metro_size"], "",
-              f"Rating: {c['metro_rating']}", "purple") +
-        rcard("C value", str(c["C_val"]), "",
-              "450 if Vs<100V | 1000 if Vs≥100V", "teal") +
-    '</div>', unsafe_allow_html=True)
-
-with col2:
-    st.markdown('<div class="rcgrid">' +
-        rcard("IFint (secondary)", f"{c['IFint_sec']:.2f}", "A",
-              f"IF/T = {c['IF']:.1f}/{lct['T']}") +
-        rcard("Vpeak (no Metrosil)", f"{c['VPk']:.0f}" if c['VPk']>0 else "N/A", "V",
-              "√(2√(2Vk(IFint×Rstab−Vk)))", "warn") +
-        rcard("β (Metrosil)", f"{beta:.2f}", "",
-              "IEC: 0.22–0.25 typical") +
-    '</div>', unsafe_allow_html=True)
-
-metro_alert = f'<div class="alert-ok">✓ P1SEC = {c["P1SEC_metro"]:.0f} W → {c["metro_size"]} Metrosil ({c["metro_rating"]}) is adequate. C={c["C_val"]}.</div>' \
-    if c["P1SEC_metro"] < 8000 else \
-    f'<div class="alert-warn">⚠ P1SEC = {c["P1SEC_metro"]:.0f} W > 8kW → 150mm Metrosil (33kJ) required.</div>'
-st.markdown(metro_alert, unsafe_allow_html=True)
-
-with st.expander("📐 Step-by-step — Metrosil Specification"):
-    st.markdown(fbox([
-        ("step", "Step 1: Metrosil 1-Second Power Rating — Equation (10)"),
-        ("eq",   "P1SEC = (4/π) × IF × (1/T) × Vk_min"),
-        ("eq",   f"P1SEC = (4/π) × {c['IF']:.1f} × (1/{lct['T']}) × {c['Vk_min']:.0f}"),
-        ("res",  f"P1SEC = {c['P1SEC_metro']:.1f} W"),
-        ("eq",   f"< 8000 W → {c['metro_size']} Metrosil ({c['metro_rating']}) sufficient"),
-        ("step", "Step 2: C Value Selection"),
-        ("eq",   f"Vs_actual = {c['Vs_actual']:.1f} V  {'< 100V → C = 450' if c['C_val']==450 else '≥ 100V → C = 1000'}"),
-        ("res",  f"C = {c['C_val']}"),
-        ("step", "Step 3: Voltage Check (Metrosil limits peak to < 3kV)"),
-        ("eq",   "VPk = √2 × √(2×Vk×(IFint×Rstab − Vk))  [without Metrosil]"),
-        ("res",  f"VPk ≈ {c['VPk']:.0f} V  → Metrosil ALWAYS recommended"),
-        ("note", "Metrosil characteristic: V = C × I^β. At Vs the Metrosil current is negligible. At internal fault voltages it clamps the peak below 3kV for safety."),
-    ]), unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# SECTION 6 — STABILISING RESISTOR RATINGS
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 6 — STABILISING RESISTOR THERMAL RATINGS", "red"), unsafe_allow_html=True)
-
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown('<div class="rcgrid">' +
-        rcard("P_cont (continuous)", f"{c['P_cont']:.2f}", "W",
-              f"Is² × Rstab = {c['Is']*1000:.2f}mA² × {c['Rstab_std']}Ω", "orange") +
-        rcard("Recommended Prating", f"{max(10, math.ceil(c['P_cont']/10)*10):.0f}", "W",
-              "Round up to standard rating", "orange") +
-    '</div>', unsafe_allow_html=True)
-
-with col2:
-    st.markdown('<div class="rcgrid">' +
-        rcard("VFint (internal fault V)", f"{c['VFint']:.1f}", "V",
-              "(Vk×Rstab×IFint)^0.75 × 1.3", "red") +
-        rcard("P1SEC (1-sec rating)", f"{c['P1SEC_res']:.1f}", "W",
-              f"VFint² / Rstab = {c['VFint']:.1f}² / {c['Rstab_std']}", "red") +
-    '</div>', unsafe_allow_html=True)
-
-with st.expander("📐 Step-by-step — Resistor Ratings"):
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(fbox([
-            ("step", "Continuous Power Rating"),
-            ("eq",   "P_cont = Is² × Rstab"),
-            ("eq",   f"P_cont = ({c['Is']:.6f})² × {c['Rstab_std']}"),
-            ("res",  f"P_cont = {c['P_cont']:.3f} W"),
-            ("eq",   f"Select standard rating ≥ {max(10, math.ceil(c['P_cont']/10)*10)} W"),
-        ]), unsafe_allow_html=True)
-    with col2:
-        st.markdown(fbox([
-            ("step", "Short Time (1-second) Power Rating — Equation (11)"),
-            ("eq",   "VFint = (Vk × Rstab × IFint)^(3/4) × 1.3"),
-            ("eq",   f"IFint = IF/T = {c['IF']:.1f}/{lct['T']} = {c['IFint_sec']:.2f} A"),
-            ("eq",   f"VFint = ({c['Vk_min']:.0f} × {c['Rstab_std']} × {c['IFint_sec']:.2f})^0.75 × 1.3"),
-            ("res",  f"VFint = {c['VFint']:.2f} V"),
-            ("eq",   f"P1SEC = VFint² / Rstab = {c['VFint']:.2f}² / {c['Rstab_std']}"),
-            ("res",  f"P1SEC = {c['P1SEC_res']:.1f} W"),
-        ]), unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════
-# SECTION 7 — COMPLETE SETTINGS SUMMARY
-# ═══════════════════════════════════════════════════════
-st.markdown(sec("SECTION 7 — COMPLETE SETTINGS SUMMARY"), unsafe_allow_html=True)
-
-p_cont_rec = max(10, math.ceil(c['P_cont']/10)*10)
-p1sec_rec  = math.ceil(c['P1SEC_res']/100)*100
-
+# Footer
 st.markdown(f"""
-<table class="settable">
-<tr><th>Parameter</th><th>Value</th><th>Unit</th><th>Notes</th></tr>
-<tr><td>Scheme Configuration</td><td class="tv">{CONFIG_NAMES[config]}</td><td>—</td><td>IEC 60044 Class PX CTs</td></tr>
-<tr><td>CT Ratio (T)</td><td class="tv">1/{lct['T']}</td><td>—</td><td>All CTs must have same ratio</td></tr>
-<tr><td>I_rated (protected winding)</td><td class="tv">{c['I_rated']:.2f}</td><td>A</td><td>{mva} MVA / (√3 × {vkv} kV)</td></tr>
-<tr><td>IF (through fault)</td><td class="tw">{c['IF']:.1f}</td><td>A</td><td>{if_mult} × I_rated</td></tr>
-<tr><td>POC (Primary Operate Current)</td><td class="tv">{c['POC_actual']:.2f}</td><td>A</td><td>{poc_pct:.1f}% of I_rated, fault setting</td></tr>
-<tr><td>Vs_min required</td><td class="tw">{c['Vs_min']:.2f}</td><td>V</td><td>From CT stability requirement</td></tr>
-<tr><td>Vs_max allowed</td><td class="tv">{c['Vs_max']:.1f}</td><td>V</td><td>Vk_min / 2 = {c['Vk_min']:.0f}/2</td></tr>
-<tr><td><strong>Relay Is (setting)</strong></td><td class="tv"><strong>{c['Is']*1000:.2f}</strong></td><td>mA</td><td>REF function pickup</td></tr>
-<tr><td><strong>Vs (actual)</strong></td><td class="tv"><strong>{c['Vs_actual']:.2f}</strong></td><td>V</td><td>Rstab × Is = {c['Rstab_std']}×{c['Is']*1000:.2f}mA</td></tr>
-<tr><td><strong>Rstab (standard)</strong></td><td class="tv"><strong>{c['Rstab_std']}</strong></td><td>Ω</td><td>Series stabilising resistor</td></tr>
-<tr><td>Rstab continuous rating</td><td class="tw">{p_cont_rec}</td><td>W</td><td>P_cont = {c['P_cont']:.2f} W, round up</td></tr>
-<tr><td>Rstab 1-sec rating</td><td class="tw">{p1sec_rec}</td><td>W</td><td>P1SEC = {c['P1SEC_res']:.1f} W (failed CB)</td></tr>
-<tr><td><strong>Metrosil (NLR)</strong></td><td class="tv"><strong>C={c['C_val']}, {c['metro_size']}</strong></td><td>—</td><td>β=0.22–0.25, {c['metro_rating']} rating</td></tr>
-<tr><td>Vk required (LCT)</td><td class="{'tv' if c['Vk_check'] else 'tr'}">{c['Vk_required']:.1f}</td><td>V</td><td>Actual Vk_LCT={lct['Vk']}V → {'✓ PASS' if c['Vk_check'] else '⚠ FAIL'}</td></tr>
-<tr><td>REF Delay</td><td class="tv">0</td><td>s</td><td>Instantaneous — no intentional delay</td></tr>
-</table>
-""", unsafe_allow_html=True)
-
-st.markdown(f"""
-<div style="margin-top:16px;padding:12px 16px;background:#ffffff;border:1px solid #7ab8d4;
-     border-radius:6px;font-family:IBM Plex Mono;font-size:11px;color:#4a7a9b;line-height:1.8;">
-⚡ Hi-Z REF Calculator | {equip_name} | {CONFIG_NAMES[config]} | {mva}MVA {vkv}kV |
-Is={c['Is']*1000:.2f}mA | Rstab={c['Rstab_std']}Ω | Vs={c['Vs_actual']:.1f}V |
-Metrosil C={c['C_val']} {c['metro_size']} | POC={c['POC_actual']:.1f}A |
-Ref: Siemens Reyrolle Technical Guidance Notes — IEC 60044
+<div style="margin-top:24px;padding:12px 16px;background:#f0f8fc;
+     border:1px solid #7ab8d4;border-radius:6px;
+     font-family:IBM Plex Mono;font-size:11px;color:#4a7fa0;line-height:1.9;">
+🔰 EHV Transformer Backup Impedance Protection | {sub_name} — {tx_name} |
+{vhv:.0f}/{vlv:.0f} kV | {mva:.0f} MVA | %Z = {pct_z:.1f}% | X/R = {xr:.0f} | VG = {vg}<br>
+CTR={ct_pri}/{ct_sec} · PTR={c['PTR']:.0f} · kk={c['kk']:.5f} |
+Z_tx = {c['Ztx']:.4f} Ω primary · FLC = {c['FLC']:.1f} A |
+Relay on HV side ({vhv:.0f} kV) — Forward directional Mho |
+IEC 60255-121:2014 · CEA Protection Guidelines 2010
 </div>
 """, unsafe_allow_html=True)
