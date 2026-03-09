@@ -120,9 +120,21 @@ def calculate_tx(inp):
     # CEA timer grading: ≥ 0.4 s from Zone 1; use 0.5 s for 400 kV class
     tZ2     = 0.50 if Vhv >= 400 else 0.40
 
-    # ── Zone 3 — Remote backup: Ztx + 1.5 × Zsys  (CEA §4.2.4) ─────────────
-    # Also verify against load impedance (see Section 4)
-    Z3r_pri = Ztx + 1.5 * Zsys
+    # -- Zone 3 -- Remote backup (CEA §4.2.4 / IEC 60255-121 §6.3) ----------
+    # Three criteria — take the MAXIMUM; hard floor Z3 >= 1.2 × Z2
+    #   Option A : Z_tx + 1.5 × Z_sys   (source-impedance based reach)
+    #   Option B : 1.8 × Z_tx           (= 1.5 × Z2; governs when source strong)
+    #   Hard floor: Z3 >= 1.2 × Z2      (IEC 60255-121 minimum grading margin)
+    Z3_optA  = Ztx + 1.5 * Zsys
+    Z3_optB  = 1.8 * Ztx
+    Z3_floor = 1.2 * Z2r_pri
+    Z3r_pri  = max(Z3_optA, Z3_optB, Z3_floor)
+    if Z3r_pri <= Z3_optA and Z3_optA >= Z3_optB:
+        Z3_governing = 'Option A (Z_tx + 1.5*Z_sys)'
+    elif Z3r_pri <= Z3_optB:
+        Z3_governing = 'Option B (1.8*Z_tx = 1.5*Z2)'
+    else:
+        Z3_governing = 'IEC floor (1.2*Z2)'
     Z3_pct  = Z3r_pri / Ztx
     Z3r_sec = Z3r_pri * kk
     if Vhv >= 400:
@@ -259,6 +271,7 @@ def calculate_tx(inp):
         "Z1_pct": Z1_pct, "Z1r_pri": Z1r_pri, "Z1r_sec": Z1r_sec, "tZ1": tZ1,
         "Z2_pct": Z2_pct, "Z2r_pri": Z2r_pri, "Z2r_sec": Z2r_sec, "tZ2": tZ2,
         "Z3_pct": Z3_pct, "Z3r_pri": Z3r_pri, "Z3r_sec": Z3r_sec, "tZ3": tZ3,
+        "Z3_optA": Z3_optA, "Z3_optB": Z3_optB, "Z3_floor": Z3_floor, "Z3_governing": Z3_governing,
         "Z4_pct": Z4_pct, "Z4r_pri": Z4r_pri, "Z4r_sec": Z4r_sec, "tZ4": tZ4,
         # ── section 3 SEF ──
         "Is_pct": Is_pct, "Is_pri": Is_pri, "Is_sec": Is_sec,
